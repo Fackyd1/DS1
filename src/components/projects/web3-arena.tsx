@@ -14,6 +14,7 @@ type EnemyTemplate = {
   speed: number;
   radius: number;
   touchDamage: number;
+  scoreValue: number;
   coinMin: number;
   coinMax: number;
   color: string;
@@ -27,6 +28,7 @@ type Enemy = {
   speed: number;
   radius: number;
   touchDamage: number;
+  scoreValue: number;
   coinMin: number;
   coinMax: number;
   color: string;
@@ -50,7 +52,6 @@ type ArenaState = {
   coins: number;
   damage: number;
   upgradeTokens: number;
-  nextUpgradeScore: number;
   running: boolean;
   paused: boolean;
 };
@@ -65,8 +66,7 @@ const PLAYER_RADIUS = 14;
 const PLAYER_SPEED = 220;
 const SPAWN_EVERY_MS = 780;
 const SHOOT_EVERY_MS = 230;
-const UPGRADE_STEP_SCORE = 200;
-const SCORE_PER_KILL = 200;
+const UPGRADE_INTERVAL_SECONDS = 120;
 const CLAIM_SCORE_TARGET = 2000;
 
 const ENEMY_POOL: EnemyTemplate[] = [
@@ -76,6 +76,7 @@ const ENEMY_POOL: EnemyTemplate[] = [
     speed: 70,
     radius: 10,
     touchDamage: 10,
+    scoreValue: 60,
     coinMin: 4,
     coinMax: 8,
     color: "#ff8f8f",
@@ -86,6 +87,7 @@ const ENEMY_POOL: EnemyTemplate[] = [
     speed: 42,
     radius: 14,
     touchDamage: 18,
+    scoreValue: 90,
     coinMin: 10,
     coinMax: 18,
     color: "#ffd166",
@@ -96,6 +98,7 @@ const ENEMY_POOL: EnemyTemplate[] = [
     speed: 56,
     radius: 11,
     touchDamage: 14,
+    scoreValue: 75,
     coinMin: 6,
     coinMax: 12,
     color: "#8ecae6",
@@ -124,7 +127,6 @@ function createArenaStartState(): ArenaState {
     coins: 0,
     damage: 9,
     upgradeTokens: 0,
-    nextUpgradeScore: UPGRADE_STEP_SCORE,
     running: false,
     paused: false,
   };
@@ -244,7 +246,7 @@ export function Web3Arena() {
     setArena(startState);
     setMenuOpen(false);
     playerRenderRef.current = { ...startState.player };
-    setClaimStatus("Survive and reach score milestones to buy upgrades.");
+    setClaimStatus("Survive and earn upgrades every 120 seconds.");
 
     startMusic();
   }
@@ -339,6 +341,7 @@ export function Web3Arena() {
         speed: template.speed * (1 + (wave - 1) * 0.03),
         radius: template.radius,
         touchDamage: template.touchDamage * (1 + (wave - 1) * 0.04),
+        scoreValue: template.scoreValue,
         coinMin: template.coinMin,
         coinMax: template.coinMax,
         color: template.color,
@@ -448,7 +451,7 @@ export function Web3Arena() {
               bullet.damage = 0;
 
               if (enemy.hp <= 0) {
-                scoreGain += SCORE_PER_KILL;
+                scoreGain += enemy.scoreValue;
 
                 if (Math.random() < 0.3) {
                   coinGain += randomBetween(enemy.coinMin, enemy.coinMax);
@@ -484,12 +487,13 @@ export function Web3Arena() {
         const score = previous.score + scoreGain;
         const wave = Math.max(1, 1 + Math.floor(time / 16));
 
-        let nextUpgradeScore = previous.nextUpgradeScore;
         let upgradeTokens = previous.upgradeTokens;
 
-        while (score >= nextUpgradeScore) {
-          upgradeTokens += 1;
-          nextUpgradeScore += UPGRADE_STEP_SCORE;
+        const previousUpgradeWindow = Math.floor(previous.time / UPGRADE_INTERVAL_SECONDS);
+        const currentUpgradeWindow = Math.floor(time / UPGRADE_INTERVAL_SECONDS);
+        const newTimeUpgrades = Math.max(0, currentUpgradeWindow - previousUpgradeWindow);
+        if (newTimeUpgrades > 0) {
+          upgradeTokens += newTimeUpgrades;
         }
 
         if (upgradeTokens > previous.upgradeTokens) {
@@ -510,7 +514,6 @@ export function Web3Arena() {
             time,
             coins: previous.coins + coinGain,
             upgradeTokens,
-            nextUpgradeScore,
             running: false,
             paused: true,
           };
@@ -525,7 +528,6 @@ export function Web3Arena() {
           time,
           coins: previous.coins + coinGain,
           upgradeTokens,
-          nextUpgradeScore,
         };
       });
 
@@ -625,6 +627,11 @@ export function Web3Arena() {
     });
   }
 
+  const secondsToNextUpgrade = Math.max(
+    0,
+    Math.ceil(UPGRADE_INTERVAL_SECONDS - (arena.time % UPGRADE_INTERVAL_SECONDS))
+  );
+
   async function connectWallet() {
     try {
       if (!("ethereum" in window)) {
@@ -693,8 +700,8 @@ export function Web3Arena() {
           <p className="text-xs tracking-[0.15em] text-[var(--color-text-muted)]">WEB3 ARENA PROTOTYPE</p>
           <h2 className="mt-2 font-display text-4xl text-[var(--color-text)]">BROTATO-STYLE SURVIVOR LAB</h2>
           <p className="mt-2 max-w-2xl text-sm text-[var(--color-text-muted)]">
-            Move with WASD or arrows. Auto-fire is enabled. 30% of defeated enemies drop coins. Score grows in 200
-            point milestones and each milestone grants one upgrade token.
+            Move with WASD or arrows. Auto-fire is enabled. 30% of defeated enemies drop coins. Enemies now give
+            lower score, and the power-up menu appears every 120 seconds.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs text-[var(--color-text-soft)]">
@@ -747,7 +754,8 @@ export function Web3Arena() {
 
       <p className="mt-3 text-sm text-[var(--color-text-muted)]">{claimStatus}</p>
       <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-        Score target: {CLAIM_SCORE_TARGET}. Press Escape during game to open pause menu and buy upgrades.
+        Score target: {CLAIM_SCORE_TARGET}. Next timed power-up in {secondsToNextUpgrade}s. Press Escape during game
+        to open pause menu.
       </p>
 
       {menuOpen ? (
@@ -760,7 +768,7 @@ export function Web3Arena() {
 
             <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
               <p>Upgrade Tokens: {arena.upgradeTokens}</p>
-              <p>Next Milestone: {arena.nextUpgradeScore}</p>
+              <p>Next Timed Upgrade: {secondsToNextUpgrade}s</p>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
