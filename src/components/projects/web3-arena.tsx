@@ -2,16 +2,34 @@
 
 import { BrowserProvider } from "ethers";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Vec2 = { x: number; y: number };
 
+type EnemyKind = "SCOUT" | "BRUTE" | "LEECH";
+
+type EnemyTemplate = {
+  kind: EnemyKind;
+  hp: number;
+  speed: number;
+  radius: number;
+  touchDamage: number;
+  coinMin: number;
+  coinMax: number;
+  color: string;
+};
+
 type Enemy = {
   id: number;
+  kind: EnemyKind;
   pos: Vec2;
   hp: number;
   speed: number;
   radius: number;
+  touchDamage: number;
+  coinMin: number;
+  coinMax: number;
+  color: string;
 };
 
 type Bullet = {
@@ -25,10 +43,16 @@ type Bullet = {
 type ArenaState = {
   player: Vec2;
   hp: number;
+  maxHp: number;
   score: number;
   wave: number;
   time: number;
+  coins: number;
+  damage: number;
+  upgradeTokens: number;
+  nextUpgradeScore: number;
   running: boolean;
+  paused: boolean;
 };
 
 type EthereumProvider = {
@@ -39,9 +63,72 @@ const WIDTH = 900;
 const HEIGHT = 460;
 const PLAYER_RADIUS = 14;
 const PLAYER_SPEED = 220;
-const SPAWN_EVERY_MS = 900;
-const SHOOT_EVERY_MS = 220;
-const TARGET_SCORE = 220;
+const SPAWN_EVERY_MS = 780;
+const SHOOT_EVERY_MS = 230;
+const UPGRADE_STEP_SCORE = 200;
+const SCORE_PER_KILL = 200;
+const CLAIM_SCORE_TARGET = 2000;
+
+const ENEMY_POOL: EnemyTemplate[] = [
+  {
+    kind: "SCOUT",
+    hp: 16,
+    speed: 70,
+    radius: 10,
+    touchDamage: 10,
+    coinMin: 4,
+    coinMax: 8,
+    color: "#ff8f8f",
+  },
+  {
+    kind: "BRUTE",
+    hp: 34,
+    speed: 42,
+    radius: 14,
+    touchDamage: 18,
+    coinMin: 10,
+    coinMax: 18,
+    color: "#ffd166",
+  },
+  {
+    kind: "LEECH",
+    hp: 22,
+    speed: 56,
+    radius: 11,
+    touchDamage: 14,
+    coinMin: 6,
+    coinMax: 12,
+    color: "#8ecae6",
+  },
+];
+
+function randomBetween(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function pickEnemyTemplate(wave: number): EnemyTemplate {
+  const roll = Math.random();
+  if (wave >= 5 && roll > 0.62) return ENEMY_POOL[1];
+  if (wave >= 3 && roll > 0.35) return ENEMY_POOL[2];
+  return ENEMY_POOL[0];
+}
+
+function createArenaStartState(): ArenaState {
+  return {
+    player: { x: WIDTH / 2, y: HEIGHT / 2 },
+    hp: 100,
+    maxHp: 100,
+    score: 0,
+    wave: 1,
+    time: 0,
+    coins: 0,
+    damage: 9,
+    upgradeTokens: 0,
+    nextUpgradeScore: UPGRADE_STEP_SCORE,
+    running: false,
+    paused: false,
+  };
+}
 
 export function Web3Arena() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -50,27 +137,97 @@ export function Web3Arena() {
   const enemiesRef = useRef<Enemy[]>([]);
   const bulletsRef = useRef<Bullet[]>([]);
   const playerRenderRef = useRef<Vec2>({ x: WIDTH / 2, y: HEIGHT / 2 });
-  const waveRef = useRef(1);
   const nextEnemyIdRef = useRef(1);
   const nextBulletIdRef = useRef(1);
   const lastSpawnRef = useRef(0);
   const lastShootRef = useRef(0);
   const lastTickRef = useRef(0);
 
-  const [arena, setArena] = useState<ArenaState>({
-    player: { x: WIDTH / 2, y: HEIGHT / 2 },
-    hp: 100,
-    score: 0,
-    wave: 1,
-    time: 0,
-    running: false,
-  });
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const musicTimerRef = useRef<number | null>(null);
+  const musicStepRef = useRef(0);
+
+  const [arena, setArena] = useState<ArenaState>(createArenaStartState());
   const [wallet, setWallet] = useState<string | null>(null);
   const [chainId, setChainId] = useState<string>("-");
-  const [claimStatus, setClaimStatus] = useState("Connect wallet and survive to claim Web3 payload.");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [musicOn, setMusicOn] = useState(true);
+  const [claimStatus, setClaimStatus] = useState(
+    "Connect wallet and survive to claim Web3 payload."
+  );
+
   const shouldReduceMotion = useReducedMotion();
 
-  const canClaim = useMemo(() => arena.score >= TARGET_SCORE && Boolean(wallet), [arena.score, wallet]);
+  const canClaim = useMemo(
+    () => arena.score >= CLAIM_SCORE_TARGET && Boolean(wallet),
+    [arena.score, wallet]
+  );
+
+  function stopLoop() {
+    if (loopRef.current !== null) {
+      cancelAnimationFrame(loopRef.current);
+      loopRef.current = null;
+    }
+  }
+
+  const stopMusic = useCallback(() => {
+    if (musicTimerRef.current !== null) {
+      window.clearInterval(musicTimerRef.current);
+      musicTimerRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+  }, []);
+
+  const playTone = useCallback((ctx: AudioContext, frequency: number, durationMs: number, volume: number) => {
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "square";
+    osc.frequency.value = frequency;
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + durationMs / 1000 + 0.02);
+  }, []);
+
+  const startMusic = useCallback(() => {
+    if (audioCtxRef.current) return;
+
+    const AudioCtx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    audioCtxRef.current = ctx;
+
+    const melody = [
+      523.25, 659.25, 783.99, 659.25,
+      493.88, 587.33, 698.46, 587.33,
+      440.0, 523.25, 659.25, 523.25,
+      493.88, 587.33, 659.25, 698.46,
+    ];
+
+    musicStepRef.current = 0;
+    musicTimerRef.current = window.setInterval(() => {
+      const step = musicStepRef.current % melody.length;
+      const note = melody[step];
+      const bass = melody[(step + 8) % melody.length] / 2;
+      playTone(ctx, note, 130, 0.028);
+      if (step % 2 === 0) {
+        playTone(ctx, bass, 160, 0.02);
+      }
+      musicStepRef.current += 1;
+    }, 170);
+  }, [playTone]);
 
   function resetGame() {
     enemiesRef.current = [];
@@ -80,29 +237,32 @@ export function Web3Arena() {
     lastSpawnRef.current = 0;
     lastShootRef.current = 0;
     lastTickRef.current = 0;
-    setArena({
-      player: { x: WIDTH / 2, y: HEIGHT / 2 },
-      hp: 100,
-      score: 0,
-      wave: 1,
-      time: 0,
-      running: true,
-    });
-    playerRenderRef.current = { x: WIDTH / 2, y: HEIGHT / 2 };
-    waveRef.current = 1;
-    setClaimStatus("Survive and reach score to unlock mint payload.");
-  }
 
-  function stopLoop() {
-    if (loopRef.current !== null) {
-      cancelAnimationFrame(loopRef.current);
-      loopRef.current = null;
-    }
+    const startState = createArenaStartState();
+    startState.running = true;
+
+    setArena(startState);
+    setMenuOpen(false);
+    playerRenderRef.current = { ...startState.player };
+    setClaimStatus("Survive and reach score milestones to buy upgrades.");
+
+    startMusic();
   }
 
   useEffect(() => {
     const onDown = (event: KeyboardEvent) => {
-      keysRef.current[event.key.toLowerCase()] = true;
+      const key = event.key.toLowerCase();
+
+      if (key === "escape") {
+        setMenuOpen((prev) => {
+          const next = !prev;
+          setArena((current) => ({ ...current, paused: next }));
+          return next;
+        });
+        return;
+      }
+
+      keysRef.current[key] = true;
     };
 
     const onUp = (event: KeyboardEvent) => {
@@ -116,8 +276,20 @@ export function Web3Arena() {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
       stopLoop();
+      stopMusic();
     };
-  }, []);
+  }, [stopMusic]);
+
+  useEffect(() => {
+    if (!musicOn) {
+      stopMusic();
+      return;
+    }
+
+    if (musicOn && arena.running && !arena.paused) {
+      startMusic();
+    }
+  }, [arena.running, arena.paused, musicOn, startMusic, stopMusic]);
 
   useEffect(() => {
     if (!arena.running) {
@@ -133,7 +305,7 @@ export function Web3Arena() {
 
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-    const spawnEnemy = (now: number) => {
+    const spawnEnemy = (now: number, wave: number) => {
       if (now - lastSpawnRef.current < SPAWN_EVERY_MS) return;
       lastSpawnRef.current = now;
 
@@ -156,16 +328,24 @@ export function Web3Arena() {
         y = HEIGHT + pad;
       }
 
+      const template = pickEnemyTemplate(wave);
+      const scaling = 1 + (wave - 1) * 0.09;
+
       enemiesRef.current.push({
         id: nextEnemyIdRef.current++,
+        kind: template.kind,
         pos: { x, y },
-        hp: 14 + Math.floor(waveRef.current * 2),
-        speed: 38 + waveRef.current * 2,
-        radius: 10,
+        hp: Math.floor(template.hp * scaling),
+        speed: template.speed * (1 + (wave - 1) * 0.03),
+        radius: template.radius,
+        touchDamage: template.touchDamage * (1 + (wave - 1) * 0.04),
+        coinMin: template.coinMin,
+        coinMax: template.coinMax,
+        color: template.color,
       });
     };
 
-    const shoot = (now: number, playerPos: Vec2) => {
+    const shoot = (now: number, playerPos: Vec2, bulletDamage: number) => {
       if (now - lastShootRef.current < SHOOT_EVERY_MS) return;
       if (enemiesRef.current.length === 0) return;
       lastShootRef.current = now;
@@ -192,7 +372,7 @@ export function Web3Arena() {
         pos: { ...playerPos },
         vel: { x: (dx / mag) * 360, y: (dy / mag) * 360 },
         radius: 4,
-        damage: 8,
+        damage: bulletDamage,
       });
     };
 
@@ -202,11 +382,13 @@ export function Web3Arena() {
       if (!lastTickRef.current) {
         lastTickRef.current = now;
       }
+
       const delta = Math.min(0.033, (now - lastTickRef.current) / 1000);
       lastTickRef.current = now;
 
       setArena((previous) => {
         if (!previous.running) return previous;
+        if (previous.paused) return previous;
 
         let px = previous.player.x;
         let py = previous.player.y;
@@ -214,18 +396,20 @@ export function Web3Arena() {
         const keys = keysRef.current;
         const vx = (keys["d"] || keys["arrowright"] ? 1 : 0) - (keys["a"] || keys["arrowleft"] ? 1 : 0);
         const vy = (keys["s"] || keys["arrowdown"] ? 1 : 0) - (keys["w"] || keys["arrowup"] ? 1 : 0);
-        const mag = Math.hypot(vx, vy) || 1;
+        const moveMag = Math.hypot(vx, vy);
 
-        px += ((vx / mag) * PLAYER_SPEED + (mag === 1 && vx === 0 ? 0 : 0)) * delta;
-        py += ((vy / mag) * PLAYER_SPEED + (mag === 1 && vy === 0 ? 0 : 0)) * delta;
+        if (moveMag > 0) {
+          px += (vx / moveMag) * PLAYER_SPEED * delta;
+          py += (vy / moveMag) * PLAYER_SPEED * delta;
+        }
 
         px = clamp(px, PLAYER_RADIUS, WIDTH - PLAYER_RADIUS);
         py = clamp(py, PLAYER_RADIUS, HEIGHT - PLAYER_RADIUS);
 
         const playerPos = { x: px, y: py };
 
-        spawnEnemy(now);
-        shoot(now, playerPos);
+        spawnEnemy(now, previous.wave);
+        shoot(now, playerPos, previous.damage);
 
         enemiesRef.current = enemiesRef.current.map((enemy) => {
           const dx = playerPos.x - enemy.pos.x;
@@ -249,17 +433,29 @@ export function Web3Arena() {
         }));
 
         let scoreGain = 0;
+        let coinGain = 0;
+
         for (const bullet of bulletsRef.current) {
+          if (bullet.damage <= 0) continue;
+
           for (const enemy of enemiesRef.current) {
             const dx = bullet.pos.x - enemy.pos.x;
             const dy = bullet.pos.y - enemy.pos.y;
             const hit = Math.hypot(dx, dy) < bullet.radius + enemy.radius;
+
             if (hit) {
               enemy.hp -= bullet.damage;
               bullet.damage = 0;
+
               if (enemy.hp <= 0) {
-                scoreGain += 10;
+                scoreGain += SCORE_PER_KILL;
+
+                if (Math.random() < 0.3) {
+                  coinGain += randomBetween(enemy.coinMin, enemy.coinMax);
+                }
               }
+
+              break;
             }
           }
         }
@@ -280,7 +476,7 @@ export function Web3Arena() {
           const dy = enemy.pos.y - playerPos.y;
           const touch = Math.hypot(dx, dy) < enemy.radius + PLAYER_RADIUS;
           if (touch) {
-            hp -= 8 * delta;
+            hp -= enemy.touchDamage * delta;
           }
         }
 
@@ -288,9 +484,23 @@ export function Web3Arena() {
         const score = previous.score + scoreGain;
         const wave = Math.max(1, 1 + Math.floor(time / 16));
 
+        let nextUpgradeScore = previous.nextUpgradeScore;
+        let upgradeTokens = previous.upgradeTokens;
+
+        while (score >= nextUpgradeScore) {
+          upgradeTokens += 1;
+          nextUpgradeScore += UPGRADE_STEP_SCORE;
+        }
+
+        if (upgradeTokens > previous.upgradeTokens) {
+          setMenuOpen(true);
+        }
+
+        playerRenderRef.current = playerPos;
+
         if (hp <= 0) {
-          playerRenderRef.current = playerPos;
-          waveRef.current = wave;
+          stopMusic();
+          setMenuOpen(true);
           return {
             ...previous,
             player: playerPos,
@@ -298,12 +508,13 @@ export function Web3Arena() {
             score,
             wave,
             time,
+            coins: previous.coins + coinGain,
+            upgradeTokens,
+            nextUpgradeScore,
             running: false,
+            paused: true,
           };
         }
-
-        playerRenderRef.current = playerPos;
-        waveRef.current = wave;
 
         return {
           ...previous,
@@ -312,6 +523,9 @@ export function Web3Arena() {
           score,
           wave,
           time,
+          coins: previous.coins + coinGain,
+          upgradeTokens,
+          nextUpgradeScore,
         };
       });
 
@@ -333,8 +547,8 @@ export function Web3Arena() {
         context.stroke();
       }
 
-      context.fillStyle = "#d6c4a0";
       const renderPlayer = playerRenderRef.current;
+      context.fillStyle = "#d6c4a0";
       context.beginPath();
       context.arc(renderPlayer.x, renderPlayer.y, PLAYER_RADIUS, 0, Math.PI * 2);
       context.fill();
@@ -347,7 +561,7 @@ export function Web3Arena() {
       }
 
       for (const enemy of enemiesRef.current) {
-        context.fillStyle = "#ff7b7b";
+        context.fillStyle = enemy.color;
         context.beginPath();
         context.arc(enemy.pos.x, enemy.pos.y, enemy.radius, 0, Math.PI * 2);
         context.fill();
@@ -361,7 +575,55 @@ export function Web3Arena() {
     return () => {
       stopLoop();
     };
-  }, [arena.running]);
+  }, [arena.running, stopMusic]);
+
+  function buyDamageUpgrade() {
+    setArena((previous) => {
+      if (previous.upgradeTokens <= 0) return previous;
+      return {
+        ...previous,
+        damage: previous.damage + 3,
+        upgradeTokens: previous.upgradeTokens - 1,
+      };
+    });
+    setClaimStatus("Damage upgraded.");
+  }
+
+  function buyLifeUpgrade() {
+    setArena((previous) => {
+      if (previous.upgradeTokens <= 0) return previous;
+      const nextMaxHp = previous.maxHp + 20;
+      const nextHp = Math.min(nextMaxHp, previous.hp + 20);
+      return {
+        ...previous,
+        hp: nextHp,
+        maxHp: nextMaxHp,
+        upgradeTokens: previous.upgradeTokens - 1,
+      };
+    });
+    setClaimStatus("Life upgraded.");
+  }
+
+  function resumeGame() {
+    setMenuOpen(false);
+    setArena((previous) => ({
+      ...previous,
+      paused: false,
+      running: previous.hp > 0,
+    }));
+  }
+
+  function toggleMusic() {
+    setMusicOn((previous) => {
+      const next = !previous;
+      if (!next) {
+        stopMusic();
+      } else if (arena.running && !arena.paused) {
+        startMusic();
+      }
+      return next;
+    });
+  }
 
   async function connectWallet() {
     try {
@@ -384,7 +646,7 @@ export function Web3Arena() {
 
       setWallet(account);
       setChainId(network.chainId.toString());
-      setClaimStatus("Wallet connected. Hit score target to unlock claim payload.");
+      setClaimStatus("Wallet connected. Reach score objective to unlock claim payload.");
     } catch {
       setClaimStatus("Unable to connect wallet.");
     }
@@ -395,7 +657,7 @@ export function Web3Arena() {
       setClaimStatus("Connect wallet first.");
       return;
     }
-    if (arena.score < TARGET_SCORE) {
+    if (arena.score < CLAIM_SCORE_TARGET) {
       setClaimStatus("Reach score target first.");
       return;
     }
@@ -415,7 +677,7 @@ export function Web3Arena() {
       return;
     }
 
-    setClaimStatus("Web3 payload generated. You can sign transaction in your wallet flow.");
+    setClaimStatus("Web3 payload generated. Sign and send it from your wallet flow.");
   }
 
   return (
@@ -431,13 +693,17 @@ export function Web3Arena() {
           <p className="text-xs tracking-[0.15em] text-[var(--color-text-muted)]">WEB3 ARENA PROTOTYPE</p>
           <h2 className="mt-2 font-display text-4xl text-[var(--color-text)]">BROTATO-STYLE SURVIVOR LAB</h2>
           <p className="mt-2 max-w-2xl text-sm text-[var(--color-text-muted)]">
-            Move with WASD or arrows. Auto-fire is enabled. Survive waves, farm score, connect wallet and unlock
-            claim payload when you hit the target score.
+            Move with WASD or arrows. Auto-fire is enabled. 30% of defeated enemies drop coins. Score grows in 200
+            point milestones and each milestone grants one upgrade token.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs text-[var(--color-text-soft)]">
-          <span className="rounded-full border border-white/20 px-3 py-1">HP {Math.ceil(arena.hp)}</span>
+          <span className="rounded-full border border-white/20 px-3 py-1">
+            HP {Math.ceil(arena.hp)}/{arena.maxHp}
+          </span>
           <span className="rounded-full border border-white/20 px-3 py-1">SCORE {arena.score}</span>
+          <span className="rounded-full border border-white/20 px-3 py-1">GOLD {arena.coins}</span>
+          <span className="rounded-full border border-white/20 px-3 py-1">DMG {arena.damage}</span>
           <span className="rounded-full border border-white/20 px-3 py-1">WAVE {arena.wave}</span>
           <span className="rounded-full border border-white/20 px-3 py-1">CHAIN {chainId}</span>
         </div>
@@ -470,12 +736,79 @@ export function Web3Arena() {
         >
           CLAIM WEB3 PAYLOAD
         </button>
+        <button
+          type="button"
+          onClick={toggleMusic}
+          className="rounded-full border border-white/20 px-5 py-2 text-sm text-[var(--color-text)]"
+        >
+          MUSIC {musicOn ? "ON" : "OFF"}
+        </button>
       </div>
 
       <p className="mt-3 text-sm text-[var(--color-text-muted)]">{claimStatus}</p>
       <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-        Score target: {TARGET_SCORE}. Contract mint requires active session and achievement validation on backend.
+        Score target: {CLAIM_SCORE_TARGET}. Press Escape during game to open pause menu and buy upgrades.
       </p>
+
+      {menuOpen ? (
+        <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/55 px-4">
+          <div className="pointer-events-auto w-full max-w-lg rounded-2xl border border-white/20 bg-[var(--color-bg-soft)]/95 p-6">
+            <h3 className="font-display text-3xl text-[var(--color-text)]">Arena Menu</h3>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              {arena.hp <= 0 ? "Run ended. Restart when ready." : "Paused. Choose your next action."}
+            </p>
+
+            <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
+              <p>Upgrade Tokens: {arena.upgradeTokens}</p>
+              <p>Next Milestone: {arena.nextUpgradeScore}</p>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={buyLifeUpgrade}
+                disabled={arena.upgradeTokens <= 0}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+              >
+                BUY LIFE (+20)
+              </button>
+              <button
+                type="button"
+                onClick={buyDamageUpgrade}
+                disabled={arena.upgradeTokens <= 0}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+              >
+                BUY DAMAGE (+3)
+              </button>
+              <button
+                type="button"
+                onClick={toggleMusic}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)]"
+              >
+                MUSIC {musicOn ? "OFF" : "ON"}
+              </button>
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={resumeGame}
+                disabled={arena.hp <= 0}
+                className="rounded-full bg-[var(--color-accent)] px-5 py-2 text-sm font-semibold text-[var(--color-bg)] disabled:opacity-40"
+              >
+                RESUME
+              </button>
+              <button
+                type="button"
+                onClick={resetGame}
+                className="rounded-full border border-white/20 px-5 py-2 text-sm text-[var(--color-text)]"
+              >
+                RESTART
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </motion.section>
   );
 }
