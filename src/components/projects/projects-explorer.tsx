@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { Project, ProjectCategory } from "@/types/portfolio";
 import { ProjectCard } from "@/components/projects/project-card";
 
@@ -13,6 +13,7 @@ type ProjectsExplorerProps = {
 type ViewMode = "grid" | "featured";
 
 export function ProjectsExplorer({ initialProjects, categories }: ProjectsExplorerProps) {
+  const shouldReduceMotion = useReducedMotion();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<ProjectCategory | "All">("All");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -35,7 +36,13 @@ export function ProjectsExplorer({ initialProjects, categories }: ProjectsExplor
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 rounded-2xl border border-white/10 bg-white/5 p-4 md:grid-cols-[1fr_auto_auto]">
+      <motion.div
+        initial={shouldReduceMotion ? undefined : { opacity: 0, y: 12 }}
+        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.3 }}
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        className="grid gap-4 rounded-2xl border border-white/10 bg-white/5 p-4 md:grid-cols-[1fr_auto_auto]"
+      >
         <label className="space-y-2">
           <span className="text-xs tracking-[0.14em] text-[var(--color-text-muted)]">SEARCH</span>
           <input
@@ -90,14 +97,28 @@ export function ProjectsExplorer({ initialProjects, categories }: ProjectsExplor
             </button>
           </div>
         </fieldset>
-      </div>
+      </motion.div>
 
       <p className="text-sm text-[var(--color-text-muted)]">Showing {filtered.length} projects</p>
 
-      <motion.div layout className={viewMode === "featured" ? "grid gap-5 md:grid-cols-2" : "grid gap-5 md:grid-cols-2 xl:grid-cols-3"}>
-        {(viewMode === "featured" ? featured : filtered).map((project) => (
-          <ProjectCard key={project.id} project={project} />
-        ))}
+      <motion.div
+        layout
+        className={viewMode === "featured" ? "grid gap-5 md:grid-cols-2" : "grid gap-5 md:grid-cols-2 xl:grid-cols-3"}
+      >
+        <AnimatePresence mode="popLayout">
+          {(viewMode === "featured" ? featured : filtered).map((project) => (
+            <motion.div
+              key={project.id}
+              layout
+              initial={shouldReduceMotion ? undefined : { opacity: 0, y: 18, scale: 0.98 }}
+              animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+              exit={shouldReduceMotion ? undefined : { opacity: 0, y: -8, scale: 0.98 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              <ProjectCard project={project} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </motion.div>
 
       {viewMode === "featured" && featured.length === 0 ? (
