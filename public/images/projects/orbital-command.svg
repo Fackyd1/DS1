@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">Orbital Command</title>
+  <desc id="desc">Telemetry dashboard visual cover.</desc>
+  <rect width="1200" height="700" fill="#0e1015" />
+  <g stroke="#4eb1a8" stroke-width="2" opacity="0.45" fill="none">
+    <circle cx="600" cy="350" r="260" />
+    <circle cx="600" cy="350" r="180" />
+    <circle cx="600" cy="350" r="90" />
+  </g>
+  <text x="120" y="580" fill="#f4efe5" font-size="62" font-family="Segoe UI, sans-serif">ORBITAL COMMAND</text>
+</svg>

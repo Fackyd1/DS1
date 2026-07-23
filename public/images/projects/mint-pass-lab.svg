@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">Mint Pass Lab</title>
+  <desc id="desc">Web3 achievement minting visual cover.</desc>
+  <rect width="1200" height="700" fill="#0f1114" />
+  <polygon points="600,120 880,280 880,500 600,640 320,500 320,280" fill="#4eb1a8" opacity="0.25" />
+  <polygon points="600,200 800,315 800,460 600,575 400,460 400,315" fill="#4eb1a8" opacity="0.4" />
+  <text x="120" y="580" fill="#f4efe5" font-size="62" font-family="Segoe UI, sans-serif">MINT PASS LAB</text>
+</svg>

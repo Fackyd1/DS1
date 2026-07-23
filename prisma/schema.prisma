@@ -1,0 +1,241 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id             String           @id @default(cuid())
+  email          String           @unique
+  username       String           @unique
+  displayName    String
+  passwordHash   String?
+  roleId         String
+  role           Role             @relation(fields: [roleId], references: [id])
+  player         Player?
+  wallet         Wallet?
+  projects       Project[]        @relation("ProjectAuthor")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  leaderboard    LeaderboardEntry[]
+  sentMessages   ContactMessage[]
+}
+
+model Project {
+  id              String      @id @default(cuid())
+  slug            String      @unique
+  name            String
+  description     String
+  longDescription String
+  technologies    Json
+  category        String
+  year            Int
+  status          String
+  githubUrl       String
+  liveUrl         String
+  imageUrl        String
+  featured        Boolean     @default(false)
+  problem         String
+  solution        String
+  architecture    Json
+  results         Json
+  authorId        String?
+  author          User?       @relation("ProjectAuthor", fields: [authorId], references: [id])
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  skills          Skill[]
+}
+
+model Skill {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  category    String
+  level       String
+  years       Int
+  description String
+  projects    Project[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Experience {
+  id         String   @id @default(cuid())
+  role       String
+  company    String
+  startDate  String
+  endDate    String
+  summary    String
+  highlights Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ContactMessage {
+  id          String   @id @default(cuid())
+  name        String
+  email       String
+  subject     String
+  message     String
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  submittedAt DateTime @default(now())
+}
+
+model Player {
+  id                 String              @id @default(cuid())
+  userId             String?             @unique
+  user               User?               @relation(fields: [userId], references: [id])
+  playerTag          String              @unique
+  level              Int                 @default(1)
+  xp                 Int                 @default(0)
+  playTimeSeconds    Int                 @default(0)
+  lastActionAt       DateTime            @default(now())
+  resources          PlayerResource[]
+  buildings          Building[]
+  workers            Worker[]
+  quests             PlayerQuest[]
+  achievements       PlayerAchievement[]
+  events             GameEvent[]
+  leaderboardEntries LeaderboardEntry[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
+
+model PlayerResource {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  wood      Int      @default(0)
+  stone     Int      @default(0)
+  iron      Int      @default(0)
+  gold      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([playerId])
+}
+
+model Building {
+  id               String   @id @default(cuid())
+  playerId         String
+  player           Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  key              String
+  name             String
+  level            Int      @default(1)
+  quantity         Int      @default(1)
+  productionPerMin Int      @default(0)
+  buildSeconds     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([playerId, key])
+}
+
+model Worker {
+  id             String   @id @default(cuid())
+  playerId       String
+  player         Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  key            String
+  name           String
+  level          Int      @default(1)
+  quantity       Int      @default(1)
+  speedMultiplier Float   @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([playerId, key])
+}
+
+model Quest {
+  id          String       @id @default(cuid())
+  key         String       @unique
+  title       String
+  description String
+  xpReward    Int
+  goldReward  Int
+  achievement String?
+  players     PlayerQuest[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model PlayerQuest {
+  id          String   @id @default(cuid())
+  playerId    String
+  player      Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  questId     String
+  quest       Quest    @relation(fields: [questId], references: [id], onDelete: Cascade)
+  status      String   @default("LOCKED")
+  progress    Int      @default(0)
+  completedAt DateTime?
+
+  @@unique([playerId, questId])
+}
+
+model Achievement {
+  id          String              @id @default(cuid())
+  key         String              @unique
+  title       String
+  description String
+  players     PlayerAchievement[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model PlayerAchievement {
+  id            String      @id @default(cuid())
+  playerId      String
+  player        Player      @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([playerId, achievementId])
+}
+
+model GameEvent {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  type      String
+  message   String
+  meta      Json?
+  createdAt DateTime @default(now())
+}
+
+model LeaderboardEntry {
+  id                 String   @id @default(cuid())
+  playerId           String
+  player             Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  userId             String?
+  user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rank               Int
+  level              Int
+  gold               Int
+  achievementsCount  Int
+  playTimeSeconds    Int
+  snapshotAt         DateTime @default(now())
+
+  @@index([snapshotAt, rank])
+}
+
+model Wallet {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address     String   @unique
+  chainId     String
+  connectedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

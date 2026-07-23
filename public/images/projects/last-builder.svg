@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">The Last Builder Prototype</title>
+  <desc id="desc">Game economy concept art cover.</desc>
+  <rect width="1200" height="700" fill="#14120f" />
+  <rect x="180" y="190" width="140" height="310" fill="#d6c4a0" opacity="0.5" />
+  <rect x="360" y="270" width="140" height="230" fill="#d6c4a0" opacity="0.35" />
+  <rect x="540" y="130" width="140" height="370" fill="#d6c4a0" opacity="0.65" />
+  <rect x="720" y="230" width="140" height="270" fill="#d6c4a0" opacity="0.42" />
+  <text x="120" y="580" fill="#f4efe5" font-size="58" font-family="Segoe UI, sans-serif">THE LAST BUILDER</text>
+</svg>
