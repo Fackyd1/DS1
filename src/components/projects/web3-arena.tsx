@@ -31,7 +31,14 @@ type Enemy = {
   scoreValue: number;
   coinMin: number;
   coinMax: number;
-  color: string;
+  skinColor: string;
+  outfitColor: string;
+  accentColor: string;
+  headScale: number;
+  torsoScale: number;
+  armScale: number;
+  legScale: number;
+  animSeed: number;
 };
 
 type Bullet = {
@@ -107,6 +114,26 @@ const ENEMY_POOL: EnemyTemplate[] = [
 
 function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomFloat(min: number, max: number): number {
+  return Math.random() * (max - min) + min;
+}
+
+function buildHumanoidStyle() {
+  const skinHue = randomBetween(22, 42);
+  const outfitHue = randomBetween(0, 360);
+  const accentHue = (outfitHue + randomBetween(35, 120)) % 360;
+  return {
+    skinColor: `hsl(${skinHue} 48% ${randomBetween(56, 70)}%)`,
+    outfitColor: `hsl(${outfitHue} ${randomBetween(45, 80)}% ${randomBetween(40, 60)}%)`,
+    accentColor: `hsl(${accentHue} ${randomBetween(55, 88)}% ${randomBetween(42, 66)}%)`,
+    headScale: randomFloat(0.85, 1.2),
+    torsoScale: randomFloat(0.85, 1.35),
+    armScale: randomFloat(0.8, 1.25),
+    legScale: randomFloat(0.9, 1.35),
+    animSeed: randomFloat(0, Math.PI * 2),
+  };
 }
 
 function pickEnemyTemplate(wave: number): EnemyTemplate {
@@ -332,6 +359,7 @@ export function Web3Arena() {
 
       const template = pickEnemyTemplate(wave);
       const scaling = 1 + (wave - 1) * 0.09;
+      const style = buildHumanoidStyle();
 
       enemiesRef.current.push({
         id: nextEnemyIdRef.current++,
@@ -344,7 +372,14 @@ export function Web3Arena() {
         scoreValue: template.scoreValue,
         coinMin: template.coinMin,
         coinMax: template.coinMax,
-        color: template.color,
+        skinColor: style.skinColor,
+        outfitColor: style.outfitColor,
+        accentColor: style.accentColor,
+        headScale: style.headScale,
+        torsoScale: style.torsoScale,
+        armScale: style.armScale,
+        legScale: style.legScale,
+        animSeed: style.animSeed,
       });
     };
 
@@ -563,10 +598,50 @@ export function Web3Arena() {
       }
 
       for (const enemy of enemiesRef.current) {
-        context.fillStyle = enemy.color;
+        const t = now / 1000;
+        const bob = Math.sin(t * 7 + enemy.animSeed) * (enemy.radius * 0.12);
+        const swing = Math.sin(t * 9 + enemy.animSeed) * 0.65;
+        const bodyBase = enemy.radius;
+        const headR = bodyBase * 0.42 * enemy.headScale;
+        const torsoH = bodyBase * 1.25 * enemy.torsoScale;
+        const torsoW = bodyBase * 0.8;
+        const armL = bodyBase * 0.82 * enemy.armScale;
+        const legL = bodyBase * 0.95 * enemy.legScale;
+
+        context.save();
+        context.translate(enemy.pos.x, enemy.pos.y + bob);
+
+        context.fillStyle = enemy.skinColor;
         context.beginPath();
-        context.arc(enemy.pos.x, enemy.pos.y, enemy.radius, 0, Math.PI * 2);
+        context.arc(0, -torsoH * 0.95, headR, 0, Math.PI * 2);
         context.fill();
+
+        context.fillStyle = enemy.outfitColor;
+        context.fillRect(-torsoW / 2, -torsoH * 0.75, torsoW, torsoH);
+
+        context.strokeStyle = enemy.accentColor;
+        context.lineWidth = Math.max(1.8, enemy.radius * 0.13);
+        context.lineCap = "round";
+
+        context.beginPath();
+        context.moveTo(-torsoW * 0.45, -torsoH * 0.5);
+        context.lineTo(-torsoW * 0.45 - swing * armL * 0.45, -torsoH * 0.12 + Math.abs(swing) * 2);
+        context.moveTo(torsoW * 0.45, -torsoH * 0.5);
+        context.lineTo(torsoW * 0.45 + swing * armL * 0.45, -torsoH * 0.12 + Math.abs(swing) * 2);
+        context.stroke();
+
+        context.strokeStyle = enemy.outfitColor;
+        context.beginPath();
+        context.moveTo(-torsoW * 0.25, torsoH * 0.25);
+        context.lineTo(-torsoW * 0.2 - swing * 0.55, torsoH * 0.25 + legL);
+        context.moveTo(torsoW * 0.25, torsoH * 0.25);
+        context.lineTo(torsoW * 0.2 + swing * 0.55, torsoH * 0.25 + legL);
+        context.stroke();
+
+        context.fillStyle = enemy.accentColor;
+        context.fillRect(-torsoW * 0.2, -torsoH * 0.25, torsoW * 0.4, torsoH * 0.18);
+
+        context.restore();
       }
 
       loopRef.current = requestAnimationFrame(tick);
