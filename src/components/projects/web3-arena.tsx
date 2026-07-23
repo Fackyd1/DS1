@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Vec2 = { x: number; y: number };
 
-type EnemyKind = "SCOUT" | "BRUTE" | "LEECH";
+type EnemyKind = "SCOUT" | "BRUTE" | "LEECH" | "BOSS_EYE";
 
 type EnemyTemplate = {
   kind: EnemyKind;
@@ -25,6 +25,7 @@ type Enemy = {
   kind: EnemyKind;
   pos: Vec2;
   hp: number;
+  maxHp: number;
   speed: number;
   radius: number;
   touchDamage: number;
@@ -38,6 +39,8 @@ type Enemy = {
   torsoScale: number;
   armScale: number;
   legScale: number;
+  hornScale: number;
+  eyeGlow: string;
   animSeed: number;
 };
 
@@ -58,6 +61,7 @@ type ArenaState = {
   time: number;
   coins: number;
   damage: number;
+  shootEveryMs: number;
   upgradeTokens: number;
   running: boolean;
   paused: boolean;
@@ -73,7 +77,9 @@ const PLAYER_RADIUS = 14;
 const PLAYER_SPEED = 220;
 const SPAWN_EVERY_MS = 780;
 const SHOOT_EVERY_MS = 230;
+const MIN_SHOOT_EVERY_MS = 90;
 const UPGRADE_INTERVAL_SECONDS = 120;
+const ROUND_DURATION_SECONDS = 45;
 const CLAIM_SCORE_TARGET = 2000;
 
 const ENEMY_POOL: EnemyTemplate[] = [
@@ -121,17 +127,20 @@ function randomFloat(min: number, max: number): number {
 }
 
 function buildHumanoidStyle() {
-  const skinHue = randomBetween(22, 42);
-  const outfitHue = randomBetween(0, 360);
-  const accentHue = (outfitHue + randomBetween(35, 120)) % 360;
+  const skinHue = randomBetween(0, 24);
+  const outfitHue = randomBetween(210, 260);
+  const accentHue = randomBetween(350, 25);
+  const tieHue = randomBetween(0, 360);
   return {
-    skinColor: `hsl(${skinHue} 48% ${randomBetween(56, 70)}%)`,
-    outfitColor: `hsl(${outfitHue} ${randomBetween(45, 80)}% ${randomBetween(40, 60)}%)`,
-    accentColor: `hsl(${accentHue} ${randomBetween(55, 88)}% ${randomBetween(42, 66)}%)`,
+    skinColor: `hsl(${skinHue} ${randomBetween(55, 80)}% ${randomBetween(38, 52)}%)`,
+    outfitColor: `hsl(${outfitHue} ${randomBetween(22, 36)}% ${randomBetween(18, 30)}%)`,
+    accentColor: `hsl(${tieHue} ${randomBetween(68, 92)}% ${randomBetween(45, 62)}%)`,
     headScale: randomFloat(0.85, 1.2),
     torsoScale: randomFloat(0.85, 1.35),
     armScale: randomFloat(0.8, 1.25),
     legScale: randomFloat(0.9, 1.35),
+    hornScale: randomFloat(0.8, 1.35),
+    eyeGlow: `hsl(${accentHue} ${randomBetween(70, 95)}% ${randomBetween(56, 72)}%)`,
     animSeed: randomFloat(0, Math.PI * 2),
   };
 }
@@ -153,6 +162,7 @@ function createArenaStartState(): ArenaState {
     time: 0,
     coins: 0,
     damage: 9,
+    shootEveryMs: SHOOT_EVERY_MS,
     upgradeTokens: 0,
     running: false,
     paused: false,
@@ -168,6 +178,8 @@ export function Web3Arena() {
   const playerRenderRef = useRef<Vec2>({ x: WIDTH / 2, y: HEIGHT / 2 });
   const nextEnemyIdRef = useRef(1);
   const nextBulletIdRef = useRef(1);
+  const lastBossWaveSpawnedRef = useRef(0);
+  const bossBannerTimeoutRef = useRef<number | null>(null);
   const lastSpawnRef = useRef(0);
   const lastShootRef = useRef(0);
   const lastTickRef = useRef(0);
@@ -181,6 +193,8 @@ export function Web3Arena() {
   const [chainId, setChainId] = useState<string>("-");
   const [menuOpen, setMenuOpen] = useState(false);
   const [musicOn, setMusicOn] = useState(true);
+  const [showBossBanner, setShowBossBanner] = useState(false);
+  const [bossHealth, setBossHealth] = useState<{ hp: number; maxHp: number } | null>(null);
   const [claimStatus, setClaimStatus] = useState(
     "Connect wallet and survive to claim Web3 payload."
   );
@@ -263,6 +277,7 @@ export function Web3Arena() {
     bulletsRef.current = [];
     nextEnemyIdRef.current = 1;
     nextBulletIdRef.current = 1;
+    lastBossWaveSpawnedRef.current = 0;
     lastSpawnRef.current = 0;
     lastShootRef.current = 0;
     lastTickRef.current = 0;
@@ -272,6 +287,14 @@ export function Web3Arena() {
 
     setArena(startState);
     setMenuOpen(false);
+    setShowBossBanner(false);
+    setBossHealth(null);
+
+    if (bossBannerTimeoutRef.current !== null) {
+      window.clearTimeout(bossBannerTimeoutRef.current);
+      bossBannerTimeoutRef.current = null;
+    }
+
     playerRenderRef.current = { ...startState.player };
     setClaimStatus("Survive and earn upgrades every 120 seconds.");
 
@@ -304,6 +327,10 @@ export function Web3Arena() {
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
+      if (bossBannerTimeoutRef.current !== null) {
+        window.clearTimeout(bossBannerTimeoutRef.current);
+        bossBannerTimeoutRef.current = null;
+      }
       stopLoop();
       stopMusic();
     };
@@ -334,57 +361,111 @@ export function Web3Arena() {
 
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-    const spawnEnemy = (now: number, wave: number) => {
-      if (now - lastSpawnRef.current < SPAWN_EVERY_MS) return;
+    const spawnEnemy = (now: number, wave: number, elapsedTime: number) => {
+      const dynamicInterval = Math.max(170, SPAWN_EVERY_MS - elapsedTime * 3.1 - wave * 16);
+      if (now - lastSpawnRef.current < dynamicInterval) return;
       lastSpawnRef.current = now;
 
-      const side = Math.floor(Math.random() * 4);
-      const pad = 20;
-      let x = 0;
-      let y = 0;
+      const packSize = Math.min(6, 1 + Math.floor(elapsedTime / 35) + Math.floor(wave / 4));
 
-      if (side === 0) {
-        x = -pad;
-        y = Math.random() * HEIGHT;
-      } else if (side === 1) {
-        x = WIDTH + pad;
-        y = Math.random() * HEIGHT;
-      } else if (side === 2) {
-        x = Math.random() * WIDTH;
-        y = -pad;
-      } else {
-        x = Math.random() * WIDTH;
-        y = HEIGHT + pad;
+      for (let i = 0; i < packSize; i += 1) {
+        const side = Math.floor(Math.random() * 4);
+        const pad = 20;
+        let x = 0;
+        let y = 0;
+
+        if (side === 0) {
+          x = -pad;
+          y = Math.random() * HEIGHT;
+        } else if (side === 1) {
+          x = WIDTH + pad;
+          y = Math.random() * HEIGHT;
+        } else if (side === 2) {
+          x = Math.random() * WIDTH;
+          y = -pad;
+        } else {
+          x = Math.random() * WIDTH;
+          y = HEIGHT + pad;
+        }
+
+        const template = pickEnemyTemplate(wave);
+        const scaling = 1 + (wave - 1) * 0.09;
+        const style = buildHumanoidStyle();
+
+        enemiesRef.current.push({
+          id: nextEnemyIdRef.current++,
+          kind: template.kind,
+          pos: { x, y },
+          hp: Math.floor(template.hp * scaling),
+          maxHp: Math.floor(template.hp * scaling),
+          speed: template.speed * (1 + (wave - 1) * 0.03),
+          radius: template.radius,
+          touchDamage: template.touchDamage * (1 + (wave - 1) * 0.04),
+          scoreValue: template.scoreValue,
+          coinMin: template.coinMin,
+          coinMax: template.coinMax,
+          skinColor: style.skinColor,
+          outfitColor: style.outfitColor,
+          accentColor: style.accentColor,
+          headScale: style.headScale,
+          torsoScale: style.torsoScale,
+          armScale: style.armScale,
+          legScale: style.legScale,
+          hornScale: style.hornScale,
+          eyeGlow: style.eyeGlow,
+          animSeed: style.animSeed,
+        });
       }
+    };
 
-      const template = pickEnemyTemplate(wave);
-      const scaling = 1 + (wave - 1) * 0.09;
+    const spawnBossIfNeeded = (wave: number) => {
+      if (wave < 10 || wave % 10 !== 0) return;
+      if (lastBossWaveSpawnedRef.current === wave) return;
+
+      const hasAliveBoss = enemiesRef.current.some((enemy) => enemy.kind === "BOSS_EYE");
+      if (hasAliveBoss) return;
+
+      lastBossWaveSpawnedRef.current = wave;
       const style = buildHumanoidStyle();
+      const bossScale = 1 + (wave / 10) * 0.22;
+      const bossHp = Math.floor(260 * bossScale);
 
       enemiesRef.current.push({
         id: nextEnemyIdRef.current++,
-        kind: template.kind,
-        pos: { x, y },
-        hp: Math.floor(template.hp * scaling),
-        speed: template.speed * (1 + (wave - 1) * 0.03),
-        radius: template.radius,
-        touchDamage: template.touchDamage * (1 + (wave - 1) * 0.04),
-        scoreValue: template.scoreValue,
-        coinMin: template.coinMin,
-        coinMax: template.coinMax,
+        kind: "BOSS_EYE",
+        pos: { x: WIDTH / 2, y: -30 },
+        hp: bossHp,
+        maxHp: bossHp,
+        speed: 30 + wave * 0.8,
+        radius: 30,
+        touchDamage: 26 + wave * 0.8,
+        scoreValue: 520,
+        coinMin: 45,
+        coinMax: 80,
         skinColor: style.skinColor,
-        outfitColor: style.outfitColor,
-        accentColor: style.accentColor,
-        headScale: style.headScale,
-        torsoScale: style.torsoScale,
-        armScale: style.armScale,
-        legScale: style.legScale,
+        outfitColor: "#1f2a44",
+        accentColor: "#7ee0b9",
+        headScale: 1.2,
+        torsoScale: 1,
+        armScale: 1,
+        legScale: 1,
+        hornScale: 1,
+        eyeGlow: "#d8f7e6",
         animSeed: style.animSeed,
       });
+
+      setShowBossBanner(true);
+      if (bossBannerTimeoutRef.current !== null) {
+        window.clearTimeout(bossBannerTimeoutRef.current);
+      }
+      bossBannerTimeoutRef.current = window.setTimeout(() => {
+        setShowBossBanner(false);
+        bossBannerTimeoutRef.current = null;
+      }, 2200);
     };
 
-    const shoot = (now: number, playerPos: Vec2, bulletDamage: number) => {
-      if (now - lastShootRef.current < SHOOT_EVERY_MS) return;
+    const shoot = (now: number, playerPos: Vec2, bulletDamage: number, shootEveryMs: number) => {
+      if (now - lastShootRef.current < shootEveryMs) return;
       if (enemiesRef.current.length === 0) return;
       lastShootRef.current = now;
 
@@ -445,9 +526,12 @@ export function Web3Arena() {
         py = clamp(py, PLAYER_RADIUS, HEIGHT - PLAYER_RADIUS);
 
         const playerPos = { x: px, y: py };
+        const time = previous.time + delta;
+        const wave = Math.max(1, 1 + Math.floor(time / ROUND_DURATION_SECONDS));
 
-        spawnEnemy(now, previous.wave);
-        shoot(now, playerPos, previous.damage);
+        spawnEnemy(now, wave, previous.time);
+        spawnBossIfNeeded(wave);
+        shoot(now, playerPos, previous.damage, previous.shootEveryMs);
 
         enemiesRef.current = enemiesRef.current.map((enemy) => {
           const dx = playerPos.x - enemy.pos.x;
@@ -518,9 +602,7 @@ export function Web3Arena() {
           }
         }
 
-        const time = previous.time + delta;
         const score = previous.score + scoreGain;
-        const wave = Math.max(1, 1 + Math.floor(time / 16));
 
         let upgradeTokens = previous.upgradeTokens;
 
@@ -533,6 +615,16 @@ export function Web3Arena() {
 
         if (upgradeTokens > previous.upgradeTokens) {
           setMenuOpen(true);
+        }
+
+        const activeBoss = enemiesRef.current.find((enemy) => enemy.kind === "BOSS_EYE");
+        if (activeBoss) {
+          setBossHealth({
+            hp: Math.max(0, activeBoss.hp),
+            maxHp: activeBoss.maxHp,
+          });
+        } else {
+          setBossHealth(null);
         }
 
         playerRenderRef.current = playerPos;
@@ -562,6 +654,7 @@ export function Web3Arena() {
           wave,
           time,
           coins: previous.coins + coinGain,
+          shootEveryMs: previous.shootEveryMs,
           upgradeTokens,
         };
       });
@@ -592,12 +685,68 @@ export function Web3Arena() {
 
       context.fillStyle = "#4eb1a8";
       for (const bullet of bulletsRef.current) {
-        context.beginPath();
-        context.arc(bullet.pos.x, bullet.pos.y, bullet.radius, 0, Math.PI * 2);
-        context.fill();
+        const angle = Math.atan2(bullet.vel.y, bullet.vel.x);
+        const bulletLength = 10;
+        const bulletWidth = 4;
+
+        context.save();
+        context.translate(bullet.pos.x, bullet.pos.y);
+        context.rotate(angle);
+
+        context.fillStyle = "#f0f6ff";
+        context.fillRect(-bulletLength * 0.5, -bulletWidth * 0.5, bulletLength, bulletWidth);
+
+        context.fillStyle = "#9ecbff";
+        context.fillRect(-bulletLength * 0.1, -bulletWidth * 0.45, bulletLength * 0.55, bulletWidth * 0.9);
+
+        context.fillStyle = "rgba(78,177,168,0.35)";
+        context.fillRect(-bulletLength * 0.9, -bulletWidth * 0.3, bulletLength * 0.4, bulletWidth * 0.6);
+
+        context.restore();
       }
 
       for (const enemy of enemiesRef.current) {
+        if (enemy.kind === "BOSS_EYE") {
+          const t = now / 1000;
+          const eyePulse = 1 + Math.sin(t * 3 + enemy.animSeed) * 0.06;
+          const blink = 0.55 + (Math.sin(t * 2.1 + enemy.animSeed) + 1) * 0.225;
+          const eyeW = enemy.radius * 2.25 * eyePulse;
+          const eyeH = enemy.radius * 1.35 * blink;
+
+          context.save();
+          context.translate(enemy.pos.x, enemy.pos.y);
+
+          context.fillStyle = "#f5f7ff";
+          context.beginPath();
+          context.ellipse(0, 0, eyeW * 0.5, eyeH * 0.5, 0, 0, Math.PI * 2);
+          context.fill();
+
+          context.fillStyle = "#6ee0b1";
+          context.beginPath();
+          context.arc(0, 0, enemy.radius * 0.38, 0, Math.PI * 2);
+          context.fill();
+
+          context.fillStyle = "#11222f";
+          context.beginPath();
+          context.arc(0, 0, enemy.radius * 0.17, 0, Math.PI * 2);
+          context.fill();
+
+          context.fillStyle = "#d8f7e6";
+          context.font = `${Math.floor(enemy.radius * 0.65)}px monospace`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillText("$", 0, 0);
+
+          context.strokeStyle = "rgba(110,224,177,0.35)";
+          context.lineWidth = 3;
+          context.beginPath();
+          context.ellipse(0, 0, eyeW * 0.62, eyeH * 0.62, 0, 0, Math.PI * 2);
+          context.stroke();
+
+          context.restore();
+          continue;
+        }
+
         const t = now / 1000;
         const bob = Math.sin(t * 7 + enemy.animSeed) * (enemy.radius * 0.12);
         const swing = Math.sin(t * 9 + enemy.animSeed) * 0.65;
@@ -607,17 +756,64 @@ export function Web3Arena() {
         const torsoW = bodyBase * 0.8;
         const armL = bodyBase * 0.82 * enemy.armScale;
         const legL = bodyBase * 0.95 * enemy.legScale;
+        const hornH = bodyBase * 0.56 * enemy.hornScale;
 
         context.save();
         context.translate(enemy.pos.x, enemy.pos.y + bob);
+
+        context.fillStyle = "#140f16";
+        context.beginPath();
+        context.moveTo(-headR * 0.68, -torsoH * 1.25);
+        context.lineTo(-headR * 0.25, -torsoH * 1.52 - hornH * 0.35);
+        context.lineTo(-headR * 0.05, -torsoH * 1.08);
+        context.closePath();
+        context.fill();
+
+        context.beginPath();
+        context.moveTo(headR * 0.68, -torsoH * 1.25);
+        context.lineTo(headR * 0.25, -torsoH * 1.52 - hornH * 0.35);
+        context.lineTo(headR * 0.05, -torsoH * 1.08);
+        context.closePath();
+        context.fill();
 
         context.fillStyle = enemy.skinColor;
         context.beginPath();
         context.arc(0, -torsoH * 0.95, headR, 0, Math.PI * 2);
         context.fill();
 
+        context.fillStyle = enemy.eyeGlow;
+        context.beginPath();
+        context.arc(-headR * 0.35, -torsoH * 0.98, Math.max(1.4, headR * 0.14), 0, Math.PI * 2);
+        context.arc(headR * 0.35, -torsoH * 0.98, Math.max(1.4, headR * 0.14), 0, Math.PI * 2);
+        context.fill();
+
+        context.strokeStyle = "#1a0f11";
+        context.lineWidth = Math.max(1.2, enemy.radius * 0.08);
+        context.beginPath();
+        context.moveTo(-headR * 0.24, -torsoH * 0.76);
+        context.lineTo(0, -torsoH * 0.7 + Math.sin(t * 8 + enemy.animSeed) * 1.4);
+        context.lineTo(headR * 0.24, -torsoH * 0.76);
+        context.stroke();
+
         context.fillStyle = enemy.outfitColor;
         context.fillRect(-torsoW / 2, -torsoH * 0.75, torsoW, torsoH);
+
+        context.fillStyle = "#f1f4f8";
+        context.beginPath();
+        context.moveTo(-torsoW * 0.18, -torsoH * 0.58);
+        context.lineTo(torsoW * 0.18, -torsoH * 0.58);
+        context.lineTo(0, -torsoH * 0.28);
+        context.closePath();
+        context.fill();
+
+        context.fillStyle = enemy.accentColor;
+        context.beginPath();
+        context.moveTo(0, -torsoH * 0.52);
+        context.lineTo(-torsoW * 0.12, -torsoH * 0.18);
+        context.lineTo(torsoW * 0.12, -torsoH * 0.18);
+        context.closePath();
+        context.fill();
+        context.fillRect(-torsoW * 0.04, -torsoH * 0.18, torsoW * 0.08, torsoH * 0.46);
 
         context.strokeStyle = enemy.accentColor;
         context.lineWidth = Math.max(1.8, enemy.radius * 0.13);
@@ -638,8 +834,14 @@ export function Web3Arena() {
         context.lineTo(torsoW * 0.2 + swing * 0.55, torsoH * 0.25 + legL);
         context.stroke();
 
-        context.fillStyle = enemy.accentColor;
-        context.fillRect(-torsoW * 0.2, -torsoH * 0.25, torsoW * 0.4, torsoH * 0.18);
+        context.strokeStyle = "rgba(255,255,255,0.22)";
+        context.lineWidth = 1.2;
+        context.beginPath();
+        context.moveTo(-torsoW * 0.5, -torsoH * 0.52);
+        context.lineTo(-torsoW * 0.17, -torsoH * 0.32);
+        context.moveTo(torsoW * 0.5, -torsoH * 0.52);
+        context.lineTo(torsoW * 0.17, -torsoH * 0.32);
+        context.stroke();
 
         context.restore();
       }
@@ -664,6 +866,18 @@ export function Web3Arena() {
       };
     });
     setClaimStatus("Damage upgraded.");
+  }
+
+  function buyFireRateUpgrade() {
+    setArena((previous) => {
+      if (previous.upgradeTokens <= 0) return previous;
+      return {
+        ...previous,
+        shootEveryMs: Math.max(MIN_SHOOT_EVERY_MS, previous.shootEveryMs - 22),
+        upgradeTokens: previous.upgradeTokens - 1,
+      };
+    });
+    setClaimStatus("Fire rate upgraded.");
   }
 
   function buyLifeUpgrade() {
@@ -776,7 +990,7 @@ export function Web3Arena() {
           <h2 className="mt-2 font-display text-4xl text-[var(--color-text)]">BROTATO-STYLE SURVIVOR LAB</h2>
           <p className="mt-2 max-w-2xl text-sm text-[var(--color-text-muted)]">
             Move with WASD or arrows. Auto-fire is enabled. 30% of defeated enemies drop coins. Enemies now give
-            lower score, and the power-up menu appears every 120 seconds.
+            lower score, rounds last 45 seconds, and a boss eye appears every 10 rounds.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs text-[var(--color-text-soft)]">
@@ -786,12 +1000,41 @@ export function Web3Arena() {
           <span className="rounded-full border border-white/20 px-3 py-1">SCORE {arena.score}</span>
           <span className="rounded-full border border-white/20 px-3 py-1">GOLD {arena.coins}</span>
           <span className="rounded-full border border-white/20 px-3 py-1">DMG {arena.damage}</span>
+          <span className="rounded-full border border-white/20 px-3 py-1">
+            ROF {(1000 / arena.shootEveryMs).toFixed(1)}/s
+          </span>
           <span className="rounded-full border border-white/20 px-3 py-1">WAVE {arena.wave}</span>
+          <span className="rounded-full border border-white/20 px-3 py-1">ROUND 45s</span>
           <span className="rounded-full border border-white/20 px-3 py-1">CHAIN {chainId}</span>
         </div>
       </div>
 
-      <div className="mt-5 overflow-hidden rounded-2xl border border-white/15">
+      <div className="relative mt-5 overflow-hidden rounded-2xl border border-white/15">
+        {bossHealth ? (
+          <div className="pointer-events-none absolute left-3 right-3 top-3 z-20">
+            <div className="flex items-center justify-between text-[10px] tracking-[0.12em] text-[#f3f5ff]">
+              <span>BOSS HP</span>
+              <span>
+                {Math.ceil(bossHealth.hp)} / {bossHealth.maxHp}
+              </span>
+            </div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full border border-[#8bf0c5]/40 bg-black/55">
+              <div
+                className="h-full bg-[linear-gradient(90deg,#62dcb8,#a0f4d8)] transition-all duration-150"
+                style={{ width: `${Math.max(0, Math.min(100, (bossHealth.hp / bossHealth.maxHp) * 100))}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {showBossBanner ? (
+          <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">
+            <div className="rounded-full border border-[#8bf0c5]/55 bg-black/70 px-5 py-2 text-sm font-semibold tracking-[0.18em] text-[#d8ffef]">
+              BOSS WAVE
+            </div>
+          </div>
+        ) : null}
+
         <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="h-auto w-full bg-[#0a0f15]" />
       </div>
 
@@ -862,6 +1105,14 @@ export function Web3Arena() {
                 className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
               >
                 BUY DAMAGE (+3)
+              </button>
+              <button
+                type="button"
+                onClick={buyFireRateUpgrade}
+                disabled={arena.upgradeTokens <= 0}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+              >
+                BUY FIRE RATE
               </button>
               <button
                 type="button"
