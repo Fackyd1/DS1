@@ -1,7 +1,7 @@
 import { ok } from "@/lib/api/http";
-import { getLeaderboard } from "@/services/game-service";
+import { getRealmLeaderboard } from "@/services/realm-backend-service";
 
 export async function GET() {
-  const leaderboard = getLeaderboard();
+  const leaderboard = await getRealmLeaderboard();
   return ok({ leaderboard });
 }

@@ -1,11 +1,11 @@
-import { getRecentEvents } from "@/services/realtime-service";
+import { getRealmEvents } from "@/services/realm-backend-service";
 
 export async function GET() {
   const encoder = new TextEncoder();
+  const snapshot = await getRealmEvents(20);
 
   const stream = new ReadableStream({
     start(controller) {
-      const snapshot = getRecentEvents(20);
       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "snapshot", events: snapshot })}\n\n`));
       controller.close();
     },

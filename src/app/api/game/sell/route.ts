@@ -1,7 +1,7 @@
 import { readSession } from "@/lib/auth/session";
 import { fail, fromError, ok } from "@/lib/api/http";
 import { sellSchema } from "@/lib/validation/schemas";
-import { sellResource } from "@/services/game-service";
+import { runSellAction } from "@/services/realm-backend-service";
 
 export async function POST(request: Request) {
   try {
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       return fail(parsed.error.issues[0]?.message || "Invalid payload", 400);
     }
 
-    const result = sellResource(session.playerTag, parsed.data.resource, parsed.data.amount);
+    const result = await runSellAction(session.playerTag, session.userId, parsed.data.resource, parsed.data.amount);
     return ok(result);
   } catch (error) {
     return fromError(error);

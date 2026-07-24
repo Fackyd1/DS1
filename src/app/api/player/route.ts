@@ -1,6 +1,7 @@
 import { createSession, generateGuestTag, readSession, setSessionCookie } from "@/lib/auth/session";
 import { ok, fromError } from "@/lib/api/http";
 import { getOrCreatePlayer } from "@/services/game-service";
+import { ensureRealmPlayer } from "@/services/realm-backend-service";
 
 export async function GET() {
   try {
@@ -13,6 +14,7 @@ export async function GET() {
       session = { role: "GUEST", mode: "guest", playerTag, exp: Math.floor(Date.now() / 1000) + 86400 };
     }
 
+    await ensureRealmPlayer(session.playerTag, session.userId);
     const player = getOrCreatePlayer(session.playerTag, session.userId);
 
     return ok({ player, session });
