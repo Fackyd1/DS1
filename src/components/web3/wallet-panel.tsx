@@ -7,10 +7,13 @@ export function WalletPanel() {
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Card (Credit/Debit)");
+  const [checkoutProvider, setCheckoutProvider] = useState("MOONPAY");
   const [isSubmittingDeposit, setIsSubmittingDeposit] = useState(false);
   const [activeIntentId, setActiveIntentId] = useState<string | null>(null);
   const [activePlayerTag, setActivePlayerTag] = useState<string | null>(null);
   const [depositVerification, setDepositVerification] = useState<"IDLE" | "PENDING" | "CONFIRMED" | "DENIED" | "FAILED">("IDLE");
+  const [checkoutCandidates, setCheckoutCandidates] = useState<Array<{ provider: string; url: string }>>([]);
+  const [fallbackIndex, setFallbackIndex] = useState(1);
 
   const binanceSolanaWallet = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
 
@@ -46,7 +49,7 @@ export function WalletPanel() {
       const response = await fetch("/api/web3/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: parsedAmount, paymentMethod }),
+        body: JSON.stringify({ amount: parsedAmount, paymentMethod, checkoutProvider }),
       });
 
       const body = (await response.json()) as {
@@ -55,6 +58,7 @@ export function WalletPanel() {
         externalCheckoutUrl?: string;
         intentId?: string;
         playerTag?: string;
+        checkoutCandidates?: Array<{ provider: string; url: string }>;
       };
       if (!response.ok) {
         setStatus(body.message || "Unable to create deposit intent.");
@@ -68,6 +72,13 @@ export function WalletPanel() {
       if (body.playerTag) {
         setActivePlayerTag(body.playerTag);
       }
+      if (body.checkoutCandidates?.length) {
+        setCheckoutCandidates(body.checkoutCandidates);
+        setFallbackIndex(1);
+      } else {
+        setCheckoutCandidates([]);
+        setFallbackIndex(1);
+      }
 
       const checkoutUrl = paymentMethod === "Card (Credit/Debit)" ? body.externalCheckoutUrl : body.solanaPayUrl;
       if (checkoutUrl) {
@@ -80,6 +91,22 @@ export function WalletPanel() {
     } finally {
       setIsSubmittingDeposit(false);
     }
+  }
+
+  function openAlternativeCheckout() {
+    if (checkoutCandidates.length < 2) {
+      setStatus("No alternative provider available yet. Start a deposit first.");
+      return;
+    }
+
+    const safeIndex = fallbackIndex >= checkoutCandidates.length ? 1 : fallbackIndex;
+    const alternative = checkoutCandidates[safeIndex];
+    window.open(alternative.url, "_blank", "noopener,noreferrer");
+    setStatus(`Opened alternative provider: ${alternative.provider}.`);
+    setFallbackIndex((current) => {
+      const next = current + 1;
+      return next >= checkoutCandidates.length ? 1 : next;
+    });
   }
 
   async function verifyDepositStatus() {
@@ -205,6 +232,20 @@ export function WalletPanel() {
               <option>USDT (Solana Wallet)</option>
             </select>
 
+            <label className="block text-sm text-[var(--color-text-soft)]" htmlFor="checkout-provider">
+              Card Provider
+            </label>
+            <select
+              id="checkout-provider"
+              value={checkoutProvider}
+              onChange={(event) => setCheckoutProvider(event.target.value)}
+              className="w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-web3)]/70"
+            >
+              <option value="MOONPAY">MoonPay</option>
+              <option value="TRANSAK">Transak</option>
+              <option value="ONRAMPER">Onramper</option>
+            </select>
+
             <div className="rounded-xl border border-white/15 bg-black/20 p-3 text-sm text-[var(--color-text-soft)]">
               <p>Asset: USDT</p>
               <p>Network: Solana (SOL)</p>
@@ -235,6 +276,14 @@ export function WalletPanel() {
                 className="rounded-full border border-white/20 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 VERIFY PAYMENT
+              </button>
+              <button
+                type="button"
+                onClick={openAlternativeCheckout}
+                disabled={checkoutCandidates.length < 2 || isSubmittingDeposit}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                TRY OTHER PROVIDER
               </button>
             </div>
 

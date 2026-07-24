@@ -6,11 +6,30 @@ type DepositBody = {
   amount?: number;
   paymentMethod?: string;
   playerTag?: string;
+  checkoutProvider?: string;
 };
 
 const RECEIVER_WALLET = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
 const USDT_SOLANA_MINT = process.env.NEXT_PUBLIC_SOLANA_USDT_MINT || "Es9vMFrzaCERmJfrF4H2FYD4KCoNkW8f2s9u6D4M7wNY";
-const DEPOSIT_PROVIDER = process.env.DEPOSIT_PROVIDER || "TRANSAK";
+const DEFAULT_DEPOSIT_PROVIDER = process.env.DEPOSIT_PROVIDER || "MOONPAY";
+
+type CheckoutProvider = "MOONPAY" | "TRANSAK" | "ONRAMPER";
+
+const SUPPORTED_CHECKOUT_PROVIDERS: CheckoutProvider[] = ["MOONPAY", "TRANSAK", "ONRAMPER"];
+
+function normalizeCheckoutProvider(value?: string): CheckoutProvider {
+  const upper = (value || "").toUpperCase() as CheckoutProvider;
+  if (SUPPORTED_CHECKOUT_PROVIDERS.includes(upper)) {
+    return upper;
+  }
+
+  const envDefault = (DEFAULT_DEPOSIT_PROVIDER || "").toUpperCase() as CheckoutProvider;
+  if (SUPPORTED_CHECKOUT_PROVIDERS.includes(envDefault)) {
+    return envDefault;
+  }
+
+  return "MOONPAY";
+}
 
 function fillTemplate(template: string, values: Record<string, string>): string {
   return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => values[key] ?? "");
@@ -23,19 +42,99 @@ function resolveCheckoutUrl(params: {
   receiverWallet: string;
   asset: string;
   network: string;
+  provider: CheckoutProvider;
 }): string {
-  const template =
-    process.env.DEPOSIT_PROVIDER_URL_TEMPLATE ||
-    "https://global.transak.com/?productsAvailed=BUY&defaultCryptoCurrency={asset}&defaultNetwork={network}&walletAddress={wallet}&fiatCurrency=USD&fiatAmount={amount}&partnerOrderId={intentId}&partnerCustomerId={playerTag}";
+  if (process.env.DEPOSIT_PROVIDER_URL_TEMPLATE) {
+    return fillTemplate(process.env.DEPOSIT_PROVIDER_URL_TEMPLATE, {
+      amount: params.amount.toFixed(2),
+      wallet: encodeURIComponent(params.receiverWallet),
+      asset: encodeURIComponent(params.asset),
+      network: encodeURIComponent(params.network),
+      intentId: encodeURIComponent(params.intentId),
+      playerTag: encodeURIComponent(params.playerTag),
+    });
+  }
 
-  return fillTemplate(template, {
-    amount: params.amount.toFixed(2),
-    wallet: encodeURIComponent(params.receiverWallet),
-    asset: encodeURIComponent(params.asset),
-    network: encodeURIComponent(params.network),
-    intentId: encodeURIComponent(params.intentId),
-    playerTag: encodeURIComponent(params.playerTag),
-  });
+  if (params.provider === "TRANSAK") {
+    return fillTemplate(
+      "https://global.transak.com/?productsAvailed=BUY&defaultCryptoCurrency={asset}&defaultNetwork={network}&walletAddress={wallet}&fiatCurrency=USD&fiatAmount={amount}&partnerOrderId={intentId}&partnerCustomerId={playerTag}",
+      {
+        amount: params.amount.toFixed(2),
+        wallet: encodeURIComponent(params.receiverWallet),
+        asset: encodeURIComponent(params.asset),
+        network: encodeURIComponent(params.network),
+        intentId: encodeURIComponent(params.intentId),
+        playerTag: encodeURIComponent(params.playerTag),
+      }
+    );
+  }
+
+  if (params.provider === "ONRAMPER") {
+    return fillTemplate(
+      "https://buy.onramper.com/?defaultCrypto={asset}&defaultAmount={amount}&defaultFiat=USD&wallets=solana:{wallet}&trackingId={intentId}&customerId={playerTag}",
+      {
+        amount: params.amount.toFixed(2),
+        wallet: encodeURIComponent(params.receiverWallet),
+        asset: encodeURIComponent(params.asset),
+        network: encodeURIComponent(params.network),
+        intentId: encodeURIComponent(params.intentId),
+        playerTag: encodeURIComponent(params.playerTag),
+      }
+    );
+  }
+
+  return fillTemplate(
+    "https://buy.moonpay.com/?currencyCode={asset}&baseCurrencyCode=usd&baseCurrencyAmount={amount}&walletAddress={wallet}&networkCode=solana&externalTransactionId={intentId}&externalCustomerId={playerTag}",
+    {
+      amount: params.amount.toFixed(2),
+      wallet: encodeURIComponent(params.receiverWallet),
+      asset: encodeURIComponent(params.asset.toLowerCase()),
+      network: encodeURIComponent(params.network),
+      intentId: encodeURIComponent(params.intentId),
+      playerTag: encodeURIComponent(params.playerTag),
+    }
+  );
+}
+
+function providerFallbackOrder(selected: CheckoutProvider): CheckoutProvider[] {
+  return [selected, ...SUPPORTED_CHECKOUT_PROVIDERS.filter((provider) => provider !== selected)];
+}
+
+function buildCheckoutCandidates(params: {
+  selectedProvider: CheckoutProvider;
+  amount: number;
+  intentId: string;
+  playerTag: string;
+  receiverWallet: string;
+  asset: string;
+  network: string;
+}) {
+  const order = providerFallbackOrder(params.selectedProvider);
+
+  return order.map((provider) => ({
+    provider,
+    url: resolveCheckoutUrl({
+      amount: params.amount,
+      intentId: params.intentId,
+      playerTag: params.playerTag,
+      receiverWallet: params.receiverWallet,
+      asset: params.asset,
+      network: params.network,
+      provider,
+    }),
+  }));
+}
+
+function providerLabel(provider: CheckoutProvider): string {
+  if (provider === "TRANSAK") {
+    return "Transak";
+  }
+
+  if (provider === "ONRAMPER") {
+    return "Onramper";
+  }
+
+  return "MoonPay";
 }
 
 export async function POST(request: Request) {
@@ -51,6 +150,7 @@ export async function POST(request: Request) {
   const paymentMethod = body.paymentMethod?.trim() || "Card (Credit/Debit)";
   const requestPlayerTag = body.playerTag?.trim();
   const playerTag = session?.playerTag || requestPlayerTag || `public-${Date.now()}`;
+  const selectedProvider = normalizeCheckoutProvider(body.checkoutProvider);
 
   const depositIntent = await createRealmDepositIntent(playerTag, {
     amount,
@@ -59,14 +159,15 @@ export async function POST(request: Request) {
     asset: "USDT",
     receiverWallet: RECEIVER_WALLET,
     playerTag,
-    provider: DEPOSIT_PROVIDER,
+    provider: providerLabel(selectedProvider),
   });
 
   const encodedLabel = encodeURIComponent("DS1 Blockchain Gate");
   const encodedMessage = encodeURIComponent(`USDT deposit for ${playerTag}`);
   const encodedMemo = encodeURIComponent(depositIntent.intentId);
   const solanaPayUrl = `solana:${RECEIVER_WALLET}?amount=${amount.toFixed(2)}&spl-token=${USDT_SOLANA_MINT}&label=${encodedLabel}&message=${encodedMessage}&memo=${encodedMemo}`;
-  const externalCheckoutUrl = resolveCheckoutUrl({
+  const checkoutCandidates = buildCheckoutCandidates({
+    selectedProvider,
     amount,
     intentId: depositIntent.intentId,
     playerTag,
@@ -74,11 +175,12 @@ export async function POST(request: Request) {
     asset: "USDT",
     network: "solana",
   });
+  const externalCheckoutUrl = checkoutCandidates[0]?.url;
 
   return ok({
-    message: "Deposit intent created. Continue in external checkout and wait for verification callback.",
+    message: "Deposit intent created. If a provider is blocked, use another provider option.",
     intentId: depositIntent.intentId,
-    provider: DEPOSIT_PROVIDER,
+    provider: selectedProvider,
     playerTag,
     amount,
     paymentMethod,
@@ -87,5 +189,6 @@ export async function POST(request: Request) {
     receiverWallet: RECEIVER_WALLET,
     solanaPayUrl,
     externalCheckoutUrl,
+    checkoutCandidates,
   });
 }
