@@ -3,10 +3,19 @@
 import { BrowserProvider } from "ethers";
 import { motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import bossSpritePath from "../../game/entities/boss.png";
+import e1SpritePath from "../../game/entities/e1.png";
+import e2SpritePath from "../../game/entities/e2.png";
+import e3SpritePath from "../../game/entities/e3.png";
+import e4SpritePath from "../../game/entities/e4.png";
+import e5SpritePath from "../../game/entities/e5.png";
+import playerSpritePath from "../../game/entities/player.png";
 
 type Vec2 = { x: number; y: number };
 
 type EnemyKind = "SCOUT" | "BRUTE" | "LEECH" | "BOSS_EYE";
+
+type SpriteKey = "player" | "e1" | "e2" | "e3" | "e4" | "e5" | "boss";
 
 type EnemyTemplate = {
   kind: EnemyKind;
@@ -23,6 +32,7 @@ type EnemyTemplate = {
 type Enemy = {
   id: number;
   kind: EnemyKind;
+  spriteKey: SpriteKey;
   pos: Vec2;
   hp: number;
   maxHp: number;
@@ -92,6 +102,7 @@ const POTION_HEAL = 40;
 const POTION_MAX_CARRY = 3;
 const POTION_ROUND_STOCK = 8;
 const CLAIM_SCORE_TARGET = 2000;
+const ENEMY_SPRITE_KEYS: Array<Exclude<SpriteKey, "player" | "boss">> = ["e1", "e2", "e3", "e4", "e5"];
 
 const ENEMY_POOL: EnemyTemplate[] = [
   {
@@ -163,6 +174,18 @@ function pickEnemyTemplate(wave: number): EnemyTemplate {
   return ENEMY_POOL[0];
 }
 
+function pickEnemySpriteKey(wave: number, kind: EnemyKind): SpriteKey {
+  if (kind === "BRUTE") {
+    return ENEMY_SPRITE_KEYS[wave % ENEMY_SPRITE_KEYS.length];
+  }
+
+  if (kind === "LEECH") {
+    return ENEMY_SPRITE_KEYS[(wave + 1) % ENEMY_SPRITE_KEYS.length];
+  }
+
+  return ENEMY_SPRITE_KEYS[(wave - 1) % ENEMY_SPRITE_KEYS.length];
+}
+
 function createArenaStartState(): ArenaState {
   return {
     player: { x: WIDTH / 2, y: HEIGHT / 2 },
@@ -198,6 +221,15 @@ export function Web3Arena() {
   const lastSpawnRef = useRef(0);
   const lastShootRef = useRef(0);
   const lastTickRef = useRef(0);
+  const spriteImagesRef = useRef<Record<SpriteKey, HTMLImageElement | null>>({
+    player: null,
+    e1: null,
+    e2: null,
+    e3: null,
+    e4: null,
+    e5: null,
+    boss: null,
+  });
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const musicTimerRef = useRef<number | null>(null);
@@ -215,6 +247,29 @@ export function Web3Arena() {
   );
 
   const shouldReduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    const sources: Record<SpriteKey, string> = {
+      player: playerSpritePath.src,
+      e1: e1SpritePath.src,
+      e2: e2SpritePath.src,
+      e3: e3SpritePath.src,
+      e4: e4SpritePath.src,
+      e5: e5SpritePath.src,
+      boss: bossSpritePath.src,
+    };
+
+    for (const [key, source] of Object.entries(sources) as Array<[SpriteKey, string]>) {
+      const image = new Image();
+      image.src = source;
+      image.onload = () => {
+        spriteImagesRef.current[key] = image;
+      };
+      image.onerror = () => {
+        spriteImagesRef.current[key] = null;
+      };
+    }
+  }, []);
 
   const canClaim = useMemo(
     () => arena.score >= CLAIM_SCORE_TARGET && Boolean(wallet),
@@ -427,6 +482,7 @@ export function Web3Arena() {
         enemiesRef.current.push({
           id: nextEnemyIdRef.current++,
           kind: template.kind,
+          spriteKey: pickEnemySpriteKey(wave, template.kind),
           pos: { x, y },
           hp: Math.floor(template.hp * scaling),
           maxHp: Math.floor(template.hp * scaling),
@@ -465,6 +521,7 @@ export function Web3Arena() {
       enemiesRef.current.push({
         id: nextEnemyIdRef.current++,
         kind: "BOSS_EYE",
+        spriteKey: "boss",
         pos: { x: WIDTH / 2, y: -30 },
         hp: bossHp,
         maxHp: bossHp,
@@ -759,10 +816,16 @@ export function Web3Arena() {
       }
 
       const renderPlayer = playerRenderRef.current;
-      context.fillStyle = "#d6c4a0";
-      context.beginPath();
-      context.arc(renderPlayer.x, renderPlayer.y, PLAYER_RADIUS, 0, Math.PI * 2);
-      context.fill();
+      const playerSprite = spriteImagesRef.current.player;
+      if (playerSprite) {
+        const size = 96;
+        context.drawImage(playerSprite, renderPlayer.x - size / 2, renderPlayer.y - size / 2, size, size);
+      } else {
+        context.fillStyle = "#d6c4a0";
+        context.beginPath();
+        context.arc(renderPlayer.x, renderPlayer.y, PLAYER_RADIUS, 0, Math.PI * 2);
+        context.fill();
+      }
 
       context.fillStyle = "#4eb1a8";
       for (const bullet of bulletsRef.current) {
@@ -788,6 +851,13 @@ export function Web3Arena() {
 
       for (const enemy of enemiesRef.current) {
         if (enemy.kind === "BOSS_EYE") {
+          const bossSprite = spriteImagesRef.current.boss;
+          if (bossSprite) {
+            const size = 220;
+            context.drawImage(bossSprite, enemy.pos.x - size / 2, enemy.pos.y - size / 2, size, size);
+            continue;
+          }
+
           const t = now / 1000;
           const eyePulse = 1 + Math.sin(t * 3 + enemy.animSeed) * 0.06;
           const blink = 0.55 + (Math.sin(t * 2.1 + enemy.animSeed) + 1) * 0.225;
@@ -825,6 +895,13 @@ export function Web3Arena() {
           context.stroke();
 
           context.restore();
+          continue;
+        }
+
+        const enemySprite = spriteImagesRef.current[enemy.spriteKey];
+        if (enemySprite) {
+          const size = Math.max(68, enemy.radius * 6);
+          context.drawImage(enemySprite, enemy.pos.x - size / 2, enemy.pos.y - size / 2, size, size);
           continue;
         }
 
