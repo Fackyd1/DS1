@@ -12,8 +12,8 @@ export const PROJECTS: Project[] = [
     category: "Full Stack",
     year: 2026,
     status: "In Progress",
-    githubUrl: "https://github.com/gaspardoval",
-    liveUrl: "https://example.com/ds1-realm",
+    githubUrl: "https://github.com/Fackyd1/DS1",
+    liveUrl: "https://ds1-pinm.onrender.com/",
     imageUrl: "/images/projects/ds1-realm.svg",
     featured: true,
     problem:
@@ -33,8 +33,8 @@ export const PROJECTS: Project[] = [
   },
   {
     id: "proj-002",
-    slug: "orbital-command",
-    name: "Orbital Command",
+    slug: "CV",
+    name: "Curriculum",
     description: "Dashboard de operaciones en tiempo real para eventos de telemetría.",
     longDescription:
       "Sistema de monitoreo con flujos de datos en tiempo real, alertas y panel administrativo.",
@@ -42,8 +42,8 @@ export const PROJECTS: Project[] = [
     category: "Web Development",
     year: 2025,
     status: "Completed",
-    githubUrl: "https://github.com/gaspardoval/orbital-command",
-    liveUrl: "https://example.com/orbital-command",
+    githubUrl: "https://github.com/Fackyd1/FAQUIT",
+    liveUrl: "https://faquit-2.onrender.com/",
     imageUrl: "/images/projects/orbital-command.svg",
     featured: true,
     problem: "Visualizar datos críticos con baja latencia y trazabilidad operativa.",
