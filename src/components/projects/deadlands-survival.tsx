@@ -26,6 +26,15 @@ function Meter({ label, value, max, tone }: { label: string; value: number; max:
   );
 }
 
+function SurfaceCard({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={["rounded-2xl border border-white/10 bg-black/20 p-4 backdrop-blur-sm", className].join(" ")}>
+      <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">{title}</p>
+      {children}
+    </div>
+  );
+}
+
 export function DeadlandsSurvival() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const runtimeStatus = useDeadlandsStore((state) => state.runtimeStatus);
@@ -149,6 +158,68 @@ export function DeadlandsSurvival() {
     };
   }, [persistSnapshot, runtimeStatus, sessionTag]);
 
+  const missionsModePanel = (
+    <SurfaceCard title="MISSIONS · MODE">
+      <div className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
+        {snapshot.quests.map((quest) => (
+          <div key={quest.key} className="rounded-2xl border border-white/8 bg-black/20 p-3">
+            <p className="text-[var(--color-text)]">{quest.title}</p>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">{quest.description}</p>
+            <p className="mt-2 text-xs text-[var(--color-text-soft)]">
+              {quest.progress}/{quest.target} · {quest.completed ? "COMPLETE" : quest.rewardText}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {(["NORMAL", "HARD", "SURVIVAL"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => enqueueCommand("CHANGE_MODE", mode)}
+            className={[
+              "rounded-full border px-3 py-2 text-xs",
+              snapshot.mode === mode
+                ? "border-[#d16d5b]/60 bg-[#d16d5b]/10 text-[var(--color-text)]"
+                : "border-white/10 text-[var(--color-text-muted)]",
+            ].join(" ")}
+          >
+            {mode}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => enqueueCommand("RESTART")}
+          className="rounded-full border border-white/10 px-3 py-2 text-xs text-[var(--color-text-soft)]"
+        >
+          Respawn
+        </button>
+        <button
+          type="button"
+          onClick={() => void persistSnapshot(true)}
+          className="rounded-full border border-[#4eb1a8]/40 px-3 py-2 text-xs text-[var(--color-text)]"
+        >
+          Save Now
+        </button>
+      </div>
+    </SurfaceCard>
+  );
+
+  const loadoutInventoryPanel = (
+    <SurfaceCard title="LOADOUT · INVENTORY">
+      <p className="mt-3 text-sm text-[var(--color-text)]">Weapon: {snapshot.currentWeaponId}</p>
+      <p className="mt-1 text-sm text-[var(--color-text-muted)]">Light ammo reserve: {snapshot.ammoReserve.LIGHT_AMMO}</p>
+      <div className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
+        {snapshot.inventory.slice(0, 8).map((item) => (
+          <div key={`${item.id}-${item.quantity}`} className="flex items-center justify-between rounded-xl border border-white/8 px-3 py-2">
+            <span>{item.name}</span>
+            <span>x{item.quantity}</span>
+          </div>
+        ))}
+      </div>
+    </SurfaceCard>
+  );
+
   return (
     <section className="space-y-6 rounded-3xl border border-[#4eb1a8]/20 bg-[linear-gradient(160deg,rgba(9,12,16,0.98),rgba(18,25,31,0.96))] p-5 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -164,8 +235,13 @@ export function DeadlandsSurvival() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.95fr)]">
-        <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/30 p-2">
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-black/30 p-2">
           <div ref={hostRef} className="aspect-video min-h-[280px] w-full rounded-[1.35rem] bg-[#090c10]" />
+
+          <div className="pointer-events-none absolute inset-x-5 top-5 z-20 hidden xl:flex xl:items-start xl:justify-between xl:gap-4">
+            <div className="pointer-events-auto w-full max-w-[360px]">{missionsModePanel}</div>
+            <div className="pointer-events-auto w-full max-w-[300px]">{loadoutInventoryPanel}</div>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -243,39 +319,9 @@ export function DeadlandsSurvival() {
             <p className="mt-3 text-sm text-[var(--color-text-muted)]">Shelter level {snapshot.shelterLevel} · Barricades {snapshot.shelterBarricades}</p>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">MISSIONS · MODE</p>
-            <div className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
-              {snapshot.quests.map((quest) => (
-                <div key={quest.key} className="rounded-2xl border border-white/8 bg-black/20 p-3">
-                  <p className="text-[var(--color-text)]">{quest.title}</p>
-                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">{quest.description}</p>
-                  <p className="mt-2 text-xs text-[var(--color-text-soft)]">{quest.progress}/{quest.target} · {quest.completed ? "COMPLETE" : quest.rewardText}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {(["NORMAL", "HARD", "SURVIVAL"] as const).map((mode) => (
-                <button key={mode} type="button" onClick={() => enqueueCommand("CHANGE_MODE", mode)} className={["rounded-full border px-3 py-2 text-xs", snapshot.mode === mode ? "border-[#d16d5b]/60 bg-[#d16d5b]/10 text-[var(--color-text)]" : "border-white/10 text-[var(--color-text-muted)]"].join(" ")}>{mode}</button>
-              ))}
-              <button type="button" onClick={() => enqueueCommand("RESTART")} className="rounded-full border border-white/10 px-3 py-2 text-xs text-[var(--color-text-soft)]">Respawn</button>
-              <button type="button" onClick={() => void persistSnapshot(true)} className="rounded-full border border-[#4eb1a8]/40 px-3 py-2 text-xs text-[var(--color-text)]">Save Now</button>
-            </div>
-          </div>
+          <div className="xl:hidden">{missionsModePanel}</div>
 
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">LOADOUT · INVENTORY</p>
-            <p className="mt-3 text-sm text-[var(--color-text)]">Weapon: {snapshot.currentWeaponId}</p>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">Light ammo reserve: {snapshot.ammoReserve.LIGHT_AMMO}</p>
-            <div className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
-              {snapshot.inventory.slice(0, 8).map((item) => (
-                <div key={`${item.id}-${item.quantity}`} className="flex items-center justify-between rounded-xl border border-white/8 px-3 py-2">
-                  <span>{item.name}</span>
-                  <span>x{item.quantity}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <div className="xl:hidden">{loadoutInventoryPanel}</div>
 
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">EVENTS · CONTROLS</p>

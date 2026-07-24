@@ -63,6 +63,8 @@ const INTERACT_RANGE = 60;
 const DAY_LENGTH_SECONDS = 240;
 const INVENTORY_WEIGHT_LIMIT = 18;
 const PIXEL_TEXTURE_KEY = "deadlands-runtime-pixel";
+const PLAYER_TEXTURE_KEY = "deadlands-player-silhouette";
+const ZOMBIE_TEXTURE_KEY = "deadlands-zombie-silhouette";
 
 const MAP_LAYOUT: Array<{ point: DeadlandsMapPoint; zone: DeadlandsZone; x: number; y: number; color: number }> = [
   { point: "SAFE HOUSE", zone: "SAFE OUTSKIRTS", x: 320, y: 320, color: 0x1f4030 },
@@ -122,6 +124,7 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
     private hordeTimer?: Phaser.Time.TimerEvent;
     private safeHousePosition = { x: 320, y: 320 };
     private barricades!: Phaser.GameObjects.Group;
+    private playerAura?: Phaser.GameObjects.Ellipse;
 
     constructor() {
       super("DeadlandsRuntimeScene");
@@ -129,7 +132,7 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
 
     create() {
       this.snapshot = useDeadlandsStore.getState().snapshot;
-      this.ensurePixelTexture();
+      this.ensureRuntimeTextures();
       this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
       this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
       this.cameras.main.setBackgroundColor("#090c10");
@@ -142,7 +145,7 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
       this.createUIOverlay();
       this.createInput();
 
-      this.spawnTimer = this.time.addEvent({ delay: 2400, loop: true, callback: () => this.spawnZombieWave() });
+      this.spawnTimer = this.time.addEvent({ delay: 4200, loop: true, callback: () => this.spawnZombieWave() });
       this.tickTimer = this.time.addEvent({ delay: 1000, loop: true, callback: () => this.onSecondTick() });
       this.hordeTimer = this.time.addEvent({ delay: 45000, loop: true, callback: () => this.triggerDynamicEvent() });
 
@@ -151,15 +154,41 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
       this.syncSnapshot(true);
     }
 
-    private ensurePixelTexture() {
-      if (this.textures.exists(PIXEL_TEXTURE_KEY)) {
+    private ensureRuntimeTextures() {
+      if (!this.textures.exists(PIXEL_TEXTURE_KEY)) {
+        const graphics = this.make.graphics({ x: 0, y: 0 });
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillRect(0, 0, 4, 4);
+        graphics.generateTexture(PIXEL_TEXTURE_KEY, 4, 4);
+        graphics.destroy();
+      }
+
+      if (!this.textures.exists(PLAYER_TEXTURE_KEY)) {
+        const graphics = this.make.graphics({ x: 0, y: 0 });
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(14, 10, 7);
+        graphics.fillRoundedRect(8, 18, 12, 18, 4);
+        graphics.fillRoundedRect(4, 22, 6, 14, 3);
+        graphics.fillRoundedRect(18, 22, 6, 14, 3);
+        graphics.fillRoundedRect(9, 34, 5, 12, 2);
+        graphics.fillRoundedRect(14, 34, 5, 12, 2);
+        graphics.generateTexture(PLAYER_TEXTURE_KEY, 28, 48);
+        graphics.destroy();
+      }
+
+      if (this.textures.exists(ZOMBIE_TEXTURE_KEY)) {
         return;
       }
 
       const graphics = this.make.graphics({ x: 0, y: 0 });
       graphics.fillStyle(0xffffff, 1);
-      graphics.fillRect(0, 0, 4, 4);
-      graphics.generateTexture(PIXEL_TEXTURE_KEY, 4, 4);
+      graphics.fillEllipse(13, 11, 15, 13);
+      graphics.fillRoundedRect(7, 16, 13, 20, 4);
+      graphics.fillRoundedRect(3, 20, 5, 14, 3);
+      graphics.fillRoundedRect(20, 20, 5, 14, 3);
+      graphics.fillRoundedRect(8, 34, 5, 12, 2);
+      graphics.fillRoundedRect(15, 34, 5, 12, 2);
+      graphics.generateTexture(ZOMBIE_TEXTURE_KEY, 28, 48);
       graphics.destroy();
     }
 
@@ -234,8 +263,8 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
     }
 
     private createPlayer() {
-      this.player = this.physics.add.image(this.safeHousePosition.x, this.safeHousePosition.y, PIXEL_TEXTURE_KEY);
-      this.player.setDisplaySize(30, 30);
+      this.player = this.physics.add.image(this.safeHousePosition.x, this.safeHousePosition.y, PLAYER_TEXTURE_KEY);
+      this.player.setDisplaySize(34, 58);
       this.player.setCircle(15);
       this.player.setSize(30, 30);
       this.player.setCollideWorldBounds(true);
@@ -243,6 +272,8 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
       this.player.setDrag(560, 560);
       this.player.setMaxVelocity(PLAYER_SPRINT_SPEED, PLAYER_SPRINT_SPEED);
 
+      this.playerAura = this.add.ellipse(this.safeHousePosition.x, this.safeHousePosition.y + 12, 54, 26, 0x4eb1a8, 0.14);
+      this.playerAura.setStrokeStyle(2, 0x7fd6cb, 0.45);
       const marker = this.add.circle(this.safeHousePosition.x, this.safeHousePosition.y, 38, 0x4eb1a8, 0.08);
       marker.setStrokeStyle(2, 0x4eb1a8, 0.35);
 
@@ -285,8 +316,8 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
     }
 
     private createZombiePool() {
-      for (let index = 0; index < 4; index += 1) {
-        this.spawnZombie(["NORMAL_ZOMBIE", "RUNNER", "BRUTE", "SCREAMER"][index] as DeadlandsEnemyKind);
+      for (let index = 0; index < 2; index += 1) {
+        this.spawnZombie(["NORMAL_ZOMBIE", "RUNNER"][index] as DeadlandsEnemyKind);
       }
     }
 
@@ -334,6 +365,10 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
         this.snapshot.distanceTraveled += (speed * delta) / 1000 / 10;
       } else {
         this.player.setVelocity(0, 0);
+      }
+
+      if (this.playerAura) {
+        this.playerAura.setPosition(this.player.x, this.player.y + 12);
       }
 
       if (moving && isSprinting) {
@@ -384,7 +419,7 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
             zombie.nextAttackAt = this.time.now + 900;
             this.applyDamage(zombie.damage);
             if (zombie.kind === "SCREAMER") {
-              this.spawnZombieWave(2);
+              this.spawnZombieWave(1);
               this.pushNotification("A Screamer attracted more infected.");
             }
           }
@@ -554,7 +589,7 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
     }
 
     private spawnZombieWave(multiplier = 1) {
-      const baseCount = this.snapshot.dayPhase === "NIGHT" ? 3 : 2;
+      const baseCount = this.snapshot.dayPhase === "NIGHT" ? 2 : 1;
       const total = baseCount * multiplier;
       for (let index = 0; index < total; index += 1) {
         this.spawnZombie();
@@ -578,10 +613,11 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
       const spawnX = clamp(this.player.x + randomRange(-300, 300), 80, WORLD_WIDTH - 80);
       const spawnY = clamp(this.player.y + randomRange(-250, 250), 80, WORLD_HEIGHT - 80);
       const radius = selected === "BRUTE" ? 18 : selected === "BOSS_ZOMBIE" ? 22 : 14;
-      const body = this.physics.add.image(spawnX, spawnY, PIXEL_TEXTURE_KEY);
-      body.setDisplaySize(radius * 2, radius * 2);
+      const body = this.physics.add.image(spawnX, spawnY, ZOMBIE_TEXTURE_KEY);
+      body.setDisplaySize(radius * 1.7, radius * 2.55);
       body.setCircle(radius);
       body.setTint(template.color);
+      body.setAlpha(selected === "SCREAMER" ? 0.9 : 0.96);
       body.setCollideWorldBounds(true);
       body.setDrag(260, 260);
 
@@ -631,7 +667,7 @@ export function createDeadlandsRuntimeScene(Phaser: typeof import("phaser")) {
       if (this.snapshot.dayPhase === "NIGHT") {
         this.pushNotification("Zombie Horde incoming.");
         this.snapshot.eventLabel = "Zombie Horde detected near the safe house.";
-        this.spawnZombieWave(3);
+        this.spawnZombieWave(2);
         return;
       }
 
