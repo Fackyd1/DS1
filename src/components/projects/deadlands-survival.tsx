@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   DEADLANDS_MAP_POINTS,
   DEADLANDS_PHASE,
@@ -26,11 +27,43 @@ function Meter({ label, value, max, tone }: { label: string; value: number; max:
   );
 }
 
-function SurfaceCard({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+function SurfaceCard({
+  title,
+  children,
+  className = "",
+  collapsible = false,
+  collapsed = false,
+  onToggle,
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
   return (
-    <div className={["rounded-2xl border border-white/10 bg-black/20 p-4 backdrop-blur-sm", className].join(" ")}>
-      <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">{title}</p>
-      {children}
+    <div
+      className={[
+        "rounded-2xl border border-white/10 bg-black/20 p-4 backdrop-blur-md transition-opacity duration-200",
+        "opacity-80 hover:opacity-100 focus-within:opacity-100",
+        className,
+      ].join(" ")}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">{title}</p>
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 text-[var(--color-text-soft)] transition-colors hover:border-white/20 hover:text-[var(--color-text)]"
+            aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+          >
+            {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          </button>
+        ) : null}
+      </div>
+      {collapsed ? null : children}
     </div>
   );
 }
@@ -48,6 +81,8 @@ export function DeadlandsSurvival() {
   const lastSavedRef = useRef("");
   const [saveStatus, setSaveStatus] = useState("Loading save...");
   const [sessionTag, setSessionTag] = useState<string | null>(null);
+  const [missionsCollapsed, setMissionsCollapsed] = useState(false);
+  const [inventoryCollapsed, setInventoryCollapsed] = useState(false);
 
   useEffect(() => {
     latestSnapshotRef.current = snapshot;
@@ -159,7 +194,12 @@ export function DeadlandsSurvival() {
   }, [persistSnapshot, runtimeStatus, sessionTag]);
 
   const missionsModePanel = (
-    <SurfaceCard title="MISSIONS · MODE">
+    <SurfaceCard
+      title="MISSIONS · MODE"
+      collapsible
+      collapsed={missionsCollapsed}
+      onToggle={() => setMissionsCollapsed((value) => !value)}
+    >
       <div className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
         {snapshot.quests.map((quest) => (
           <div key={quest.key} className="rounded-2xl border border-white/8 bg-black/20 p-3">
@@ -206,7 +246,12 @@ export function DeadlandsSurvival() {
   );
 
   const loadoutInventoryPanel = (
-    <SurfaceCard title="LOADOUT · INVENTORY">
+    <SurfaceCard
+      title="LOADOUT · INVENTORY"
+      collapsible
+      collapsed={inventoryCollapsed}
+      onToggle={() => setInventoryCollapsed((value) => !value)}
+    >
       <p className="mt-3 text-sm text-[var(--color-text)]">Weapon: {snapshot.currentWeaponId}</p>
       <p className="mt-1 text-sm text-[var(--color-text-muted)]">Light ammo reserve: {snapshot.ammoReserve.LIGHT_AMMO}</p>
       <div className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
