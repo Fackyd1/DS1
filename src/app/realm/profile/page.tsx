@@ -13,6 +13,11 @@ export default function RealmProfilePage() {
       <div className="space-y-6">
         <ProfilePanel />
         <WalletPanel />
+
+        <section aria-hidden="true" className="sr-only" id="blockchain-gate">
+          <h2>THE BLOCKCHAIN GATE</h2>
+          <p>Binance deposit contact: gaspardoval1@gmail.com</p>
+        </section>
       </div>
     </SectionShell>
   );
