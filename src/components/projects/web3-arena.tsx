@@ -1338,6 +1338,92 @@ export function Web3Arena() {
         ) : null}
 
         <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="h-auto w-full bg-[#0a0f15]" />
+
+        {menuOpen ? (
+          <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/55 px-4">
+            <div className="pointer-events-auto w-full max-w-lg rounded-2xl border border-white/20 bg-[var(--color-bg-soft)]/95 p-6">
+              <h3 className="font-display text-3xl text-[var(--color-text)]">SoB Menu</h3>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                {arena.hp <= 0 ? "Run ended. Restart when ready." : "Paused. Choose your next action."}
+              </p>
+
+              <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
+                <p>Upgrade Token: {arena.upgradeTokens}</p>
+                <p>Next Shop Cycle: {secondsToNextUpgrade}s</p>
+                <p>Sword: {arena.swordUnlocked ? "Equipped" : `Locked (${SWORD_COST} GOLD)`}</p>
+                <p>Potions: {arena.potionCount}/{POTION_MAX_CARRY} carried</p>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={buySwordUpgrade}
+                  disabled={arena.swordUnlocked || arena.coins < SWORD_COST}
+                  className="rounded-full border border-[var(--color-accent)]/70 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                >
+                  {arena.swordUnlocked ? "SWORD EQUIPPED" : "BUY SWORD (3000 GOLD)"}
+                </button>
+                <button
+                  type="button"
+                  onClick={buyPotion}
+                  disabled={arena.coins < POTION_COST || arena.potionCount >= POTION_MAX_CARRY || arena.potionStock <= 0}
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                >
+                  BUY POTION (300 GOLD)
+                </button>
+                <button
+                  type="button"
+                  onClick={buyLifeUpgrade}
+                  disabled={arena.upgradeTokens <= 0 || arena.coins < LIFE_UPGRADE_COST}
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                >
+                  BUY LIFE (+20) - {LIFE_UPGRADE_COST} GOLD
+                </button>
+                <button
+                  type="button"
+                  onClick={buyDamageUpgrade}
+                  disabled={arena.upgradeTokens <= 0 || arena.coins < DAMAGE_UPGRADE_COST}
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                >
+                  BUY DAMAGE (+3) - {DAMAGE_UPGRADE_COST} GOLD
+                </button>
+                <button
+                  type="button"
+                  onClick={buyFireRateUpgrade}
+                  disabled={arena.upgradeTokens <= 0 || arena.coins < FIRE_RATE_UPGRADE_COST}
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                >
+                  BUY FIRE RATE - {FIRE_RATE_UPGRADE_COST} GOLD
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleMusic}
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)]"
+                >
+                  MUSIC {musicOn ? "OFF" : "ON"}
+                </button>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={resumeGame}
+                  disabled={arena.hp <= 0}
+                  className="rounded-full bg-[var(--color-accent)] px-5 py-2 text-sm font-semibold text-[var(--color-bg)] disabled:opacity-40"
+                >
+                  RESUME
+                </button>
+                <button
+                  type="button"
+                  onClick={resetGame}
+                  className="rounded-full border border-white/20 px-5 py-2 text-sm text-[var(--color-text)]"
+                >
+                  RESTART
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -1379,91 +1465,6 @@ export function Web3Arena() {
         cooldown.
       </p>
 
-      {menuOpen ? (
-        <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/55 px-4">
-          <div className="pointer-events-auto w-full max-w-lg rounded-2xl border border-white/20 bg-[var(--color-bg-soft)]/95 p-6">
-            <h3 className="font-display text-3xl text-[var(--color-text)]">SoB Menu</h3>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              {arena.hp <= 0 ? "Run ended. Restart when ready." : "Paused. Choose your next action."}
-            </p>
-
-            <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
-              <p>Upgrade Token: {arena.upgradeTokens}</p>
-              <p>Next Shop Cycle: {secondsToNextUpgrade}s</p>
-              <p>Sword: {arena.swordUnlocked ? "Equipped" : `Locked (${SWORD_COST} GOLD)`}</p>
-              <p>Potions: {arena.potionCount}/{POTION_MAX_CARRY} carried</p>
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={buySwordUpgrade}
-                disabled={arena.swordUnlocked || arena.coins < SWORD_COST}
-                className="rounded-full border border-[var(--color-accent)]/70 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-              >
-                {arena.swordUnlocked ? "SWORD EQUIPPED" : "BUY SWORD (3000 GOLD)"}
-              </button>
-              <button
-                type="button"
-                onClick={buyPotion}
-                disabled={arena.coins < POTION_COST || arena.potionCount >= POTION_MAX_CARRY || arena.potionStock <= 0}
-                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-              >
-                BUY POTION (300 GOLD)
-              </button>
-              <button
-                type="button"
-                onClick={buyLifeUpgrade}
-                disabled={arena.upgradeTokens <= 0 || arena.coins < LIFE_UPGRADE_COST}
-                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-              >
-                BUY LIFE (+20) - {LIFE_UPGRADE_COST} GOLD
-              </button>
-              <button
-                type="button"
-                onClick={buyDamageUpgrade}
-                disabled={arena.upgradeTokens <= 0 || arena.coins < DAMAGE_UPGRADE_COST}
-                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-              >
-                BUY DAMAGE (+3) - {DAMAGE_UPGRADE_COST} GOLD
-              </button>
-              <button
-                type="button"
-                onClick={buyFireRateUpgrade}
-                disabled={arena.upgradeTokens <= 0 || arena.coins < FIRE_RATE_UPGRADE_COST}
-                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-              >
-                BUY FIRE RATE - {FIRE_RATE_UPGRADE_COST} GOLD
-              </button>
-              <button
-                type="button"
-                onClick={toggleMusic}
-                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)]"
-              >
-                MUSIC {musicOn ? "OFF" : "ON"}
-              </button>
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={resumeGame}
-                disabled={arena.hp <= 0}
-                className="rounded-full bg-[var(--color-accent)] px-5 py-2 text-sm font-semibold text-[var(--color-bg)] disabled:opacity-40"
-              >
-                RESUME
-              </button>
-              <button
-                type="button"
-                onClick={resetGame}
-                className="rounded-full border border-white/20 px-5 py-2 text-sm text-[var(--color-text)]"
-              >
-                RESTART
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </motion.section>
   );
 }
