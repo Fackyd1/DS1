@@ -17,6 +17,18 @@ type EnemyKind = "SCOUT" | "BRUTE" | "LEECH" | "BOSS_EYE";
 
 type SpriteKey = "player" | "e1" | "e2" | "e3" | "e4" | "e5" | "boss";
 
+type SpriteBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type SpriteMeta = {
+  image: HTMLImageElement;
+  bounds: SpriteBounds;
+};
+
 type EnemyTemplate = {
   kind: EnemyKind;
   hp: number;
@@ -33,6 +45,7 @@ type Enemy = {
   id: number;
   kind: EnemyKind;
   spriteKey: SpriteKey;
+  hitRadius: number;
   pos: Vec2;
   hp: number;
   maxHp: number;
@@ -91,7 +104,7 @@ const PLAYER_SPEED = 220;
 const SPAWN_EVERY_MS = 780;
 const SHOOT_EVERY_MS = 230;
 const MIN_SHOOT_EVERY_MS = 90;
-const UPGRADE_INTERVAL_SECONDS = 120;
+const UPGRADE_INTERVAL_SECONDS = 60;
 const ROUND_DURATION_SECONDS = 45;
 const SWORD_COST = 3000;
 const SWORD_RANGE = 22;
@@ -103,6 +116,15 @@ const POTION_MAX_CARRY = 3;
 const POTION_ROUND_STOCK = 8;
 const CLAIM_SCORE_TARGET = 2000;
 const ENEMY_SPRITE_KEYS: Array<Exclude<SpriteKey, "player" | "boss">> = ["e1", "e2", "e3", "e4", "e5"];
+const PLAYER_DRAW_HEIGHT = 108;
+const PLAYER_HIT_RADIUS = 16;
+const REGULAR_ENEMY_DRAW_HEIGHT_MULTIPLIER = 6;
+const REGULAR_ENEMY_HIT_RADIUS_MULTIPLIER = 1.45;
+const BOSS_DRAW_HEIGHT = 220;
+const BOSS_HIT_RADIUS = 74;
+const LIFE_UPGRADE_COST = 500;
+const DAMAGE_UPGRADE_COST = 650;
+const FIRE_RATE_UPGRADE_COST = 650;
 
 const ENEMY_POOL: EnemyTemplate[] = [
   {
@@ -186,6 +208,77 @@ function pickEnemySpriteKey(wave: number, kind: EnemyKind): SpriteKey {
   return ENEMY_SPRITE_KEYS[(wave - 1) % ENEMY_SPRITE_KEYS.length];
 }
 
+function getOpaqueBounds(image: HTMLImageElement): SpriteBounds {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight };
+  }
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0);
+
+  const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha > 8) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) {
+    return { x: 0, y: 0, width, height };
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
+function drawCroppedSprite(
+  context: CanvasRenderingContext2D,
+  meta: SpriteMeta,
+  center: Vec2,
+  drawHeight: number,
+  drawWidthScale = 1
+): void {
+  const aspect = meta.bounds.width / meta.bounds.height;
+  const drawWidth = drawHeight * aspect * drawWidthScale;
+  context.drawImage(
+    meta.image,
+    meta.bounds.x,
+    meta.bounds.y,
+    meta.bounds.width,
+    meta.bounds.height,
+    center.x - drawWidth / 2,
+    center.y - drawHeight / 2,
+    drawWidth,
+    drawHeight
+  );
+}
+
+function estimateHitRadius(meta: SpriteMeta, drawHeight: number, minimumRadius: number): number {
+  const aspect = meta.bounds.width / meta.bounds.height;
+  const drawWidth = drawHeight * aspect;
+  return Math.max(minimumRadius, Math.round(Math.min(drawWidth, drawHeight) * 0.35));
+}
+
 function createArenaStartState(): ArenaState {
   return {
     player: { x: WIDTH / 2, y: HEIGHT / 2 },
@@ -221,7 +314,7 @@ export function Web3Arena() {
   const lastSpawnRef = useRef(0);
   const lastShootRef = useRef(0);
   const lastTickRef = useRef(0);
-  const spriteImagesRef = useRef<Record<SpriteKey, HTMLImageElement | null>>({
+  const spriteImagesRef = useRef<Record<SpriteKey, SpriteMeta | null>>({
     player: null,
     e1: null,
     e2: null,
@@ -263,7 +356,10 @@ export function Web3Arena() {
       const image = new Image();
       image.src = source;
       image.onload = () => {
-        spriteImagesRef.current[key] = image;
+        spriteImagesRef.current[key] = {
+          image,
+          bounds: getOpaqueBounds(image),
+        };
       };
       image.onerror = () => {
         spriteImagesRef.current[key] = null;
@@ -367,7 +463,7 @@ export function Web3Arena() {
     }
 
     playerRenderRef.current = { ...startState.player };
-    setClaimStatus("Survive and earn upgrades every 120 seconds. Sword costs 3000 GOLD. Potions cost 300 GOLD.");
+    setClaimStatus("Survive and earn upgrades every 60 seconds. Sword costs 3000 GOLD. Potions cost 300 GOLD.");
 
     startMusic();
   }
@@ -478,11 +574,15 @@ export function Web3Arena() {
         const template = pickEnemyTemplate(wave);
         const scaling = 1 + (wave - 1) * 0.09;
         const style = buildHumanoidStyle();
+        const spriteKey = pickEnemySpriteKey(wave, template.kind);
+        const spriteMeta = spriteImagesRef.current[spriteKey];
+        const drawHeight = Math.max(68, template.radius * REGULAR_ENEMY_DRAW_HEIGHT_MULTIPLIER);
 
         enemiesRef.current.push({
           id: nextEnemyIdRef.current++,
           kind: template.kind,
-          spriteKey: pickEnemySpriteKey(wave, template.kind),
+          spriteKey,
+          hitRadius: spriteMeta ? estimateHitRadius(spriteMeta, drawHeight, 13) : Math.max(13, Math.round(template.radius * REGULAR_ENEMY_HIT_RADIUS_MULTIPLIER)),
           pos: { x, y },
           hp: Math.floor(template.hp * scaling),
           maxHp: Math.floor(template.hp * scaling),
@@ -517,11 +617,13 @@ export function Web3Arena() {
       const style = buildHumanoidStyle();
       const bossScale = 1 + (wave / 10) * 0.22;
       const bossHp = Math.floor(260 * bossScale);
+      const bossMeta = spriteImagesRef.current.boss;
 
       enemiesRef.current.push({
         id: nextEnemyIdRef.current++,
         kind: "BOSS_EYE",
         spriteKey: "boss",
+        hitRadius: bossMeta ? estimateHitRadius(bossMeta, BOSS_DRAW_HEIGHT, BOSS_HIT_RADIUS) : BOSS_HIT_RADIUS,
         pos: { x: WIDTH / 2, y: -30 },
         hp: bossHp,
         maxHp: bossHp,
@@ -602,7 +704,7 @@ export function Web3Arena() {
         const dx = enemy.pos.x - playerPos.x;
         const dy = enemy.pos.y - playerPos.y;
         const distance = Math.hypot(dx, dy);
-        if (distance <= SWORD_RANGE + enemy.radius && distance < targetDistance) {
+        if (distance <= SWORD_RANGE + enemy.hitRadius && distance < targetDistance) {
           target = enemy;
           targetDistance = distance;
         }
@@ -627,6 +729,8 @@ export function Web3Arena() {
 
       const delta = Math.min(0.033, (now - lastTickRef.current) / 1000);
       lastTickRef.current = now;
+      const playerMeta = spriteImagesRef.current.player;
+      const playerHitRadius = playerMeta ? estimateHitRadius(playerMeta, PLAYER_DRAW_HEIGHT, PLAYER_HIT_RADIUS) : PLAYER_HIT_RADIUS;
 
       setArena((previous) => {
         if (!previous.running) return previous;
@@ -645,8 +749,8 @@ export function Web3Arena() {
           py += (vy / moveMag) * PLAYER_SPEED * delta;
         }
 
-        px = clamp(px, PLAYER_RADIUS, WIDTH - PLAYER_RADIUS);
-        py = clamp(py, PLAYER_RADIUS, HEIGHT - PLAYER_RADIUS);
+        px = clamp(px, playerHitRadius, WIDTH - playerHitRadius);
+        py = clamp(py, playerHitRadius, HEIGHT - playerHitRadius);
 
         const playerPos = { x: px, y: py };
         const time = previous.time + delta;
@@ -694,7 +798,7 @@ export function Web3Arena() {
           for (const enemy of enemiesRef.current) {
             const dx = bullet.pos.x - enemy.pos.x;
             const dy = bullet.pos.y - enemy.pos.y;
-            const hit = Math.hypot(dx, dy) < bullet.radius + enemy.radius;
+            const hit = Math.hypot(dx, dy) < bullet.radius + enemy.hitRadius;
 
             if (hit) {
               enemy.hp -= bullet.damage;
@@ -727,7 +831,7 @@ export function Web3Arena() {
         for (const enemy of enemiesRef.current) {
           const dx = enemy.pos.x - playerPos.x;
           const dy = enemy.pos.y - playerPos.y;
-          const touch = Math.hypot(dx, dy) < enemy.radius + PLAYER_RADIUS;
+          const touch = Math.hypot(dx, dy) < enemy.hitRadius + playerHitRadius;
           if (touch) {
             hp -= enemy.touchDamage * delta;
           }
@@ -745,8 +849,8 @@ export function Web3Arena() {
         const previousUpgradeWindow = Math.floor(previous.time / UPGRADE_INTERVAL_SECONDS);
         const currentUpgradeWindow = Math.floor(time / UPGRADE_INTERVAL_SECONDS);
         const newTimeUpgrades = Math.max(0, currentUpgradeWindow - previousUpgradeWindow);
-        if (newTimeUpgrades > 0) {
-          upgradeTokens += newTimeUpgrades;
+        if (newTimeUpgrades > 0 && upgradeTokens === 0) {
+          upgradeTokens = 1;
         }
 
         if (upgradeTokens > previous.upgradeTokens) {
@@ -818,8 +922,7 @@ export function Web3Arena() {
       const renderPlayer = playerRenderRef.current;
       const playerSprite = spriteImagesRef.current.player;
       if (playerSprite) {
-        const size = 96;
-        context.drawImage(playerSprite, renderPlayer.x - size / 2, renderPlayer.y - size / 2, size, size);
+        drawCroppedSprite(context, playerSprite, renderPlayer, PLAYER_DRAW_HEIGHT, 1.02);
       } else {
         context.fillStyle = "#d6c4a0";
         context.beginPath();
@@ -853,8 +956,7 @@ export function Web3Arena() {
         if (enemy.kind === "BOSS_EYE") {
           const bossSprite = spriteImagesRef.current.boss;
           if (bossSprite) {
-            const size = 220;
-            context.drawImage(bossSprite, enemy.pos.x - size / 2, enemy.pos.y - size / 2, size, size);
+            drawCroppedSprite(context, bossSprite, enemy.pos, BOSS_DRAW_HEIGHT, 1);
             continue;
           }
 
@@ -900,8 +1002,7 @@ export function Web3Arena() {
 
         const enemySprite = spriteImagesRef.current[enemy.spriteKey];
         if (enemySprite) {
-          const size = Math.max(68, enemy.radius * 6);
-          context.drawImage(enemySprite, enemy.pos.x - size / 2, enemy.pos.y - size / 2, size, size);
+          drawCroppedSprite(context, enemySprite, enemy.pos, Math.max(68, enemy.radius * REGULAR_ENEMY_DRAW_HEIGHT_MULTIPLIER), 1);
           continue;
         }
 
@@ -1016,40 +1117,46 @@ export function Web3Arena() {
 
   function buyDamageUpgrade() {
     setArena((previous) => {
-      if (previous.upgradeTokens <= 0) return previous;
+      if (previous.upgradeTokens <= 0 || previous.coins < DAMAGE_UPGRADE_COST) return previous;
       return {
         ...previous,
         damage: previous.damage + 3,
+        coins: previous.coins - DAMAGE_UPGRADE_COST,
         upgradeTokens: previous.upgradeTokens - 1,
       };
     });
+    setMenuOpen(false);
     setClaimStatus("Damage upgraded.");
   }
 
   function buyFireRateUpgrade() {
     setArena((previous) => {
-      if (previous.upgradeTokens <= 0) return previous;
+      if (previous.upgradeTokens <= 0 || previous.coins < FIRE_RATE_UPGRADE_COST) return previous;
       return {
         ...previous,
         shootEveryMs: Math.max(MIN_SHOOT_EVERY_MS, previous.shootEveryMs - 22),
+        coins: previous.coins - FIRE_RATE_UPGRADE_COST,
         upgradeTokens: previous.upgradeTokens - 1,
       };
     });
+    setMenuOpen(false);
     setClaimStatus("Fire rate upgraded.");
   }
 
   function buyLifeUpgrade() {
     setArena((previous) => {
-      if (previous.upgradeTokens <= 0) return previous;
+      if (previous.upgradeTokens <= 0 || previous.coins < LIFE_UPGRADE_COST) return previous;
       const nextMaxHp = previous.maxHp + 20;
       const nextHp = Math.min(nextMaxHp, previous.hp + 20);
       return {
         ...previous,
         hp: nextHp,
         maxHp: nextMaxHp,
+        coins: previous.coins - LIFE_UPGRADE_COST,
         upgradeTokens: previous.upgradeTokens - 1,
       };
     });
+    setMenuOpen(false);
     setClaimStatus("Life upgraded.");
   }
 
@@ -1174,8 +1281,8 @@ export function Web3Arena() {
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs tracking-[0.15em] text-[var(--color-text-muted)]">WEB3 ARENA PROTOTYPE</p>
-          <h2 className="mt-2 font-display text-4xl text-[var(--color-text)]">BROTATO-STYLE SURVIVOR LAB</h2>
+          <p className="text-xs tracking-[0.15em] text-[var(--color-text-muted)]">SOB</p>
+          <h2 className="mt-2 font-display text-4xl text-[var(--color-text)]">SoB</h2>
           <p className="mt-2 max-w-2xl text-sm text-[var(--color-text-muted)]">
             Move with WASD or arrows. Auto-fire is enabled. 30% of defeated enemies drop coins. Enemies now give
             lower score, rounds last 45 seconds, and a boss eye appears every 10 rounds.
@@ -1275,14 +1382,14 @@ export function Web3Arena() {
       {menuOpen ? (
         <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/55 px-4">
           <div className="pointer-events-auto w-full max-w-lg rounded-2xl border border-white/20 bg-[var(--color-bg-soft)]/95 p-6">
-            <h3 className="font-display text-3xl text-[var(--color-text)]">Arena Menu</h3>
+            <h3 className="font-display text-3xl text-[var(--color-text)]">SoB Menu</h3>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
               {arena.hp <= 0 ? "Run ended. Restart when ready." : "Paused. Choose your next action."}
             </p>
 
             <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
-              <p>Upgrade Tokens: {arena.upgradeTokens}</p>
-              <p>Next Timed Upgrade: {secondsToNextUpgrade}s</p>
+              <p>Upgrade Token: {arena.upgradeTokens}</p>
+              <p>Next Shop Cycle: {secondsToNextUpgrade}s</p>
               <p>Sword: {arena.swordUnlocked ? "Equipped" : `Locked (${SWORD_COST} GOLD)`}</p>
               <p>Potions: {arena.potionCount}/{POTION_MAX_CARRY} carried</p>
             </div>
@@ -1307,26 +1414,26 @@ export function Web3Arena() {
               <button
                 type="button"
                 onClick={buyLifeUpgrade}
-                disabled={arena.upgradeTokens <= 0}
+                disabled={arena.upgradeTokens <= 0 || arena.coins < LIFE_UPGRADE_COST}
                 className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
               >
-                BUY LIFE (+20)
+                BUY LIFE (+20) - {LIFE_UPGRADE_COST} GOLD
               </button>
               <button
                 type="button"
                 onClick={buyDamageUpgrade}
-                disabled={arena.upgradeTokens <= 0}
+                disabled={arena.upgradeTokens <= 0 || arena.coins < DAMAGE_UPGRADE_COST}
                 className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
               >
-                BUY DAMAGE (+3)
+                BUY DAMAGE (+3) - {DAMAGE_UPGRADE_COST} GOLD
               </button>
               <button
                 type="button"
                 onClick={buyFireRateUpgrade}
-                disabled={arena.upgradeTokens <= 0}
+                disabled={arena.upgradeTokens <= 0 || arena.coins < FIRE_RATE_UPGRADE_COST}
                 className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
               >
-                BUY FIRE RATE
+                BUY FIRE RATE - {FIRE_RATE_UPGRADE_COST} GOLD
               </button>
               <button
                 type="button"
