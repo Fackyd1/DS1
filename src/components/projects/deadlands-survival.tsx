@@ -382,7 +382,7 @@ export function DeadlandsSurvival() {
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs tracking-[0.14em] text-[#9fb2bf]">FEATURE COVERAGE</p>
+            
             <ul className="mt-3 space-y-2 text-sm text-[var(--color-text-soft)]">
               {DEADLANDS_PHASE_ONE_FEATURES.map((feature) => (
                 <li key={feature}>{feature}</li>
