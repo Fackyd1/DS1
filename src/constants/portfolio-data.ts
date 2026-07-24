@@ -46,7 +46,7 @@ export const PROJECTS: Project[] = [
     liveUrl: "https://faquit-2.onrender.com/",
     imageUrl: "/images/projects/orbital-command.svg",
     featured: true,
-    problem: "Visualizar datos críticos con baja latencia y trazabilidad operativa.",
+    problem: "Visualizar datos personales y mostrar mi habilidad.",
     solution: "Arquitectura event-driven con almacenamiento relacional y vistas de alta legibilidad.",
     architecture: ["API REST + WebSocket", "PostgreSQL", "RBAC para administración"],
     results: ["Tiempo de respuesta estable", "Escalabilidad horizontal de workers"],
