@@ -120,7 +120,7 @@ const POTION_ROUND_STOCK = 8;
 const CLAIM_SCORE_TARGET = 2000;
 const ENEMY_SPRITE_KEYS: Array<Exclude<SpriteKey, "player" | "boss">> = ["e1", "e2", "e3", "e4", "e5"];
 const PLAYER_DRAW_HEIGHT = 108;
-const PLAYER_HIT_RADIUS = 16;
+const PLAYER_HIT_RADIUS = 24;
 const REGULAR_ENEMY_DRAW_HEIGHT_MULTIPLIER = 6;
 const REGULAR_ENEMY_HIT_RADIUS_MULTIPLIER = 1.45;
 const BOSS_DRAW_HEIGHT = 220;
@@ -1470,21 +1470,6 @@ export function Web3Arena() {
         </button>
         <button
           type="button"
-          onClick={connectWallet}
-          className="rounded-full border border-[var(--color-web3)]/70 px-5 py-2 text-sm text-[var(--color-text)]"
-        >
-          CONNECT WALLET
-        </button>
-        <button
-          type="button"
-          onClick={claimPayload}
-          disabled={!canClaim}
-          className="rounded-full border border-white/20 px-5 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-        >
-          CLAIM WEB3 PAYLOAD
-        </button>
-        <button
-          type="button"
           onClick={toggleMusic}
           className="rounded-full border border-white/20 px-5 py-2 text-sm text-[var(--color-text)]"
         >
@@ -1492,8 +1477,8 @@ export function Web3Arena() {
         </button>
       </div>
 
-      <p className="mt-3 text-sm text-[var(--color-text-muted)]">{claimStatus}</p>
-      <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+      <p className="mt-3 text-xs text-[var(--color-text-muted)]">{claimStatus}</p>
+      <p className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]">
         Score target: {CLAIM_SCORE_TARGET}. Next timed power-up in {secondsToNextUpgrade}s. Press Q to use a life
         potion and Escape during game to open pause menu. Sword melee hits only nearby normal enemies with a 3s
         cooldown.

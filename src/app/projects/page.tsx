@@ -1,6 +1,6 @@
 import { SectionShell } from "@/components/layout/section-shell";
+import { GameLauncher } from "@/components/projects/game-launcher";
 import { ProjectsExplorer } from "@/components/projects/projects-explorer";
-import { Web3Arena } from "@/components/projects/web3-arena";
 import { getProjectCategories, getProjects } from "@/services/portfolio-service";
 
 export const metadata = {
@@ -15,7 +15,7 @@ export default function ProjectsPage() {
   return (
     <SectionShell id="projects-page" eyebrow="PORTFOLIO" title="All Projects">
       <div className="space-y-8">
-        <Web3Arena />
+        <GameLauncher />
         <ProjectsExplorer initialProjects={projects} categories={categories} />
       </div>
     </SectionShell>
