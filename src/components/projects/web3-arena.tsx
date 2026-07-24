@@ -86,6 +86,9 @@ type ArenaState = {
   damage: number;
   shootEveryMs: number;
   upgradeTokens: number;
+  lifeUpgradeCost: number;
+  damageUpgradeCost: number;
+  fireRateUpgradeCost: number;
   swordUnlocked: boolean;
   potionCount: number;
   potionStock: number;
@@ -106,7 +109,7 @@ const SHOOT_EVERY_MS = 230;
 const MIN_SHOOT_EVERY_MS = 90;
 const UPGRADE_INTERVAL_SECONDS = 60;
 const ROUND_DURATION_SECONDS = 45;
-const SWORD_COST = 3000;
+const SWORD_COST = 1000;
 const SWORD_RANGE = 22;
 const SWORD_DAMAGE = 9999;
 const SWORD_COOLDOWN_MS = 3000;
@@ -122,9 +125,11 @@ const REGULAR_ENEMY_DRAW_HEIGHT_MULTIPLIER = 6;
 const REGULAR_ENEMY_HIT_RADIUS_MULTIPLIER = 1.45;
 const BOSS_DRAW_HEIGHT = 220;
 const BOSS_HIT_RADIUS = 74;
-const LIFE_UPGRADE_COST = 500;
-const DAMAGE_UPGRADE_COST = 650;
-const FIRE_RATE_UPGRADE_COST = 650;
+const INITIAL_LIFE_UPGRADE_COST = 400;
+const INITIAL_DAMAGE_UPGRADE_COST = 300;
+const INITIAL_FIRE_RATE_UPGRADE_COST = 150;
+const UPGRADE_COST_STEP = 20;
+const ENEMY_GOLD_BONUS = 10;
 
 const ENEMY_POOL: EnemyTemplate[] = [
   {
@@ -291,6 +296,9 @@ function createArenaStartState(): ArenaState {
     damage: 9,
     shootEveryMs: SHOOT_EVERY_MS,
     upgradeTokens: 0,
+    lifeUpgradeCost: INITIAL_LIFE_UPGRADE_COST,
+    damageUpgradeCost: INITIAL_DAMAGE_UPGRADE_COST,
+    fireRateUpgradeCost: INITIAL_FIRE_RATE_UPGRADE_COST,
     swordUnlocked: false,
     potionCount: 0,
     potionStock: POTION_ROUND_STOCK,
@@ -332,6 +340,7 @@ export function Web3Arena() {
   const [wallet, setWallet] = useState<string | null>(null);
   const [chainId, setChainId] = useState<string>("-");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuMode, setMenuMode] = useState<"shop" | "pause" | null>(null);
   const [musicOn, setMusicOn] = useState(true);
   const [showBossBanner, setShowBossBanner] = useState(false);
   const [bossHealth, setBossHealth] = useState<{ hp: number; maxHp: number } | null>(null);
@@ -454,6 +463,7 @@ export function Web3Arena() {
 
     setArena(startState);
     setMenuOpen(false);
+    setMenuMode(null);
     setShowBossBanner(false);
     setBossHealth(null);
 
@@ -463,7 +473,7 @@ export function Web3Arena() {
     }
 
     playerRenderRef.current = { ...startState.player };
-    setClaimStatus("Survive and earn upgrades every 60 seconds. Sword costs 3000 GOLD. Potions cost 300 GOLD.");
+    setClaimStatus("Survive and earn upgrades every 60 seconds. Sword costs 1000 GOLD. Potions cost 300 GOLD.");
 
     startMusic();
   }
@@ -473,11 +483,9 @@ export function Web3Arena() {
       const key = event.key.toLowerCase();
 
       if (key === "escape") {
-        setMenuOpen((prev) => {
-          const next = !prev;
-          setArena((current) => ({ ...current, paused: next }));
-          return next;
-        });
+        setMenuOpen(true);
+        setMenuMode("pause");
+        setArena((current) => ({ ...current, paused: true }));
         return;
       }
 
@@ -808,7 +816,7 @@ export function Web3Arena() {
                 scoreGain += enemy.scoreValue;
 
                 if (Math.random() < 0.3) {
-                  coinGain += randomBetween(enemy.coinMin, enemy.coinMax);
+                  coinGain += randomBetween(enemy.coinMin, enemy.coinMax) + ENEMY_GOLD_BONUS;
                 }
               }
 
@@ -849,12 +857,14 @@ export function Web3Arena() {
         const previousUpgradeWindow = Math.floor(previous.time / UPGRADE_INTERVAL_SECONDS);
         const currentUpgradeWindow = Math.floor(time / UPGRADE_INTERVAL_SECONDS);
         const newTimeUpgrades = Math.max(0, currentUpgradeWindow - previousUpgradeWindow);
+        const shopOpened = newTimeUpgrades > 0 && upgradeTokens > previous.upgradeTokens;
         if (newTimeUpgrades > 0 && upgradeTokens === 0) {
           upgradeTokens = 1;
         }
 
-        if (upgradeTokens > previous.upgradeTokens) {
+        if (shopOpened) {
           setMenuOpen(true);
+          setMenuMode("shop");
         }
 
         const activeBoss = enemiesRef.current.find((enemy) => enemy.kind === "BOSS_EYE");
@@ -872,6 +882,7 @@ export function Web3Arena() {
         if (hp <= 0) {
           stopMusic();
           setMenuOpen(true);
+          setMenuMode("shop");
           return {
             ...previous,
             player: playerPos,
@@ -881,6 +892,9 @@ export function Web3Arena() {
             time,
             coins: previous.coins + coinGain,
             upgradeTokens,
+            lifeUpgradeCost: previous.lifeUpgradeCost,
+            damageUpgradeCost: previous.damageUpgradeCost,
+            fireRateUpgradeCost: previous.fireRateUpgradeCost,
             potionStock,
             running: false,
             paused: true,
@@ -897,6 +911,10 @@ export function Web3Arena() {
           coins: previous.coins + coinGain,
           shootEveryMs: previous.shootEveryMs,
           upgradeTokens,
+          paused: previous.paused || shopOpened,
+          lifeUpgradeCost: previous.lifeUpgradeCost,
+          damageUpgradeCost: previous.damageUpgradeCost,
+          fireRateUpgradeCost: previous.fireRateUpgradeCost,
           potionStock,
         };
       });
@@ -1117,11 +1135,12 @@ export function Web3Arena() {
 
   function buyDamageUpgrade() {
     setArena((previous) => {
-      if (previous.upgradeTokens <= 0 || previous.coins < DAMAGE_UPGRADE_COST) return previous;
+      if (previous.upgradeTokens <= 0 || previous.coins < previous.damageUpgradeCost) return previous;
       return {
         ...previous,
         damage: previous.damage + 3,
-        coins: previous.coins - DAMAGE_UPGRADE_COST,
+        coins: previous.coins - previous.damageUpgradeCost,
+        damageUpgradeCost: previous.damageUpgradeCost + UPGRADE_COST_STEP,
         upgradeTokens: previous.upgradeTokens - 1,
       };
     });
@@ -1131,11 +1150,12 @@ export function Web3Arena() {
 
   function buyFireRateUpgrade() {
     setArena((previous) => {
-      if (previous.upgradeTokens <= 0 || previous.coins < FIRE_RATE_UPGRADE_COST) return previous;
+      if (previous.upgradeTokens <= 0 || previous.coins < previous.fireRateUpgradeCost) return previous;
       return {
         ...previous,
         shootEveryMs: Math.max(MIN_SHOOT_EVERY_MS, previous.shootEveryMs - 22),
-        coins: previous.coins - FIRE_RATE_UPGRADE_COST,
+        coins: previous.coins - previous.fireRateUpgradeCost,
+        fireRateUpgradeCost: previous.fireRateUpgradeCost + UPGRADE_COST_STEP,
         upgradeTokens: previous.upgradeTokens - 1,
       };
     });
@@ -1145,14 +1165,15 @@ export function Web3Arena() {
 
   function buyLifeUpgrade() {
     setArena((previous) => {
-      if (previous.upgradeTokens <= 0 || previous.coins < LIFE_UPGRADE_COST) return previous;
+      if (previous.upgradeTokens <= 0 || previous.coins < previous.lifeUpgradeCost) return previous;
       const nextMaxHp = previous.maxHp + 20;
       const nextHp = Math.min(nextMaxHp, previous.hp + 20);
       return {
         ...previous,
         hp: nextHp,
         maxHp: nextMaxHp,
-        coins: previous.coins - LIFE_UPGRADE_COST,
+        coins: previous.coins - previous.lifeUpgradeCost,
+        lifeUpgradeCost: previous.lifeUpgradeCost + UPGRADE_COST_STEP,
         upgradeTokens: previous.upgradeTokens - 1,
       };
     });
@@ -1171,6 +1192,8 @@ export function Web3Arena() {
         potionCount: Math.min(previous.potionCount, POTION_MAX_CARRY),
       };
     });
+    setMenuMode(null);
+    setMenuOpen(false);
     setClaimStatus("Sword equipped. Melee mode enabled.");
   }
 
@@ -1187,11 +1210,14 @@ export function Web3Arena() {
         potionStock: previous.potionStock - 1,
       };
     });
+    setMenuMode(null);
+    setMenuOpen(false);
     setClaimStatus("Potion purchased.");
   }
 
   function resumeGame() {
     setMenuOpen(false);
+    setMenuMode(null);
     setArena((previous) => ({
       ...previous,
       paused: false,
@@ -1342,9 +1368,15 @@ export function Web3Arena() {
         {menuOpen ? (
           <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/55 px-4">
             <div className="pointer-events-auto w-full max-w-lg rounded-2xl border border-white/20 bg-[var(--color-bg-soft)]/95 p-6">
-              <h3 className="font-display text-3xl text-[var(--color-text)]">SoB Menu</h3>
+              <h3 className="font-display text-3xl text-[var(--color-text)]">
+                {menuMode === "shop" ? "SoB Shop" : "SoB Pause"}
+              </h3>
               <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                {arena.hp <= 0 ? "Run ended. Restart when ready." : "Paused. Choose your next action."}
+                {arena.hp <= 0
+                  ? "Run ended. Restart when ready."
+                  : menuMode === "shop"
+                    ? "Shop cycle open. Buy one upgrade before it closes."
+                    : "Paused. Resume when you're ready."}
               </p>
 
               <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
@@ -1354,55 +1386,57 @@ export function Web3Arena() {
                 <p>Potions: {arena.potionCount}/{POTION_MAX_CARRY} carried</p>
               </div>
 
-              <div className="mt-5 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={buySwordUpgrade}
-                  disabled={arena.swordUnlocked || arena.coins < SWORD_COST}
-                  className="rounded-full border border-[var(--color-accent)]/70 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-                >
-                  {arena.swordUnlocked ? "SWORD EQUIPPED" : "BUY SWORD (3000 GOLD)"}
-                </button>
-                <button
-                  type="button"
-                  onClick={buyPotion}
-                  disabled={arena.coins < POTION_COST || arena.potionCount >= POTION_MAX_CARRY || arena.potionStock <= 0}
-                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-                >
-                  BUY POTION (300 GOLD)
-                </button>
-                <button
-                  type="button"
-                  onClick={buyLifeUpgrade}
-                  disabled={arena.upgradeTokens <= 0 || arena.coins < LIFE_UPGRADE_COST}
-                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-                >
-                  BUY LIFE (+20) - {LIFE_UPGRADE_COST} GOLD
-                </button>
-                <button
-                  type="button"
-                  onClick={buyDamageUpgrade}
-                  disabled={arena.upgradeTokens <= 0 || arena.coins < DAMAGE_UPGRADE_COST}
-                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-                >
-                  BUY DAMAGE (+3) - {DAMAGE_UPGRADE_COST} GOLD
-                </button>
-                <button
-                  type="button"
-                  onClick={buyFireRateUpgrade}
-                  disabled={arena.upgradeTokens <= 0 || arena.coins < FIRE_RATE_UPGRADE_COST}
-                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
-                >
-                  BUY FIRE RATE - {FIRE_RATE_UPGRADE_COST} GOLD
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleMusic}
-                  className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)]"
-                >
-                  MUSIC {musicOn ? "OFF" : "ON"}
-                </button>
-              </div>
+              {menuMode === "shop" ? (
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={buySwordUpgrade}
+                    disabled={arena.swordUnlocked || arena.coins < SWORD_COST}
+                    className="rounded-full border border-[var(--color-accent)]/70 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                  >
+                    {arena.swordUnlocked ? "SWORD EQUIPPED" : `BUY SWORD (${SWORD_COST} GOLD)`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={buyPotion}
+                    disabled={arena.coins < POTION_COST || arena.potionCount >= POTION_MAX_CARRY || arena.potionStock <= 0}
+                    className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                  >
+                    BUY POTION (300 GOLD)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={buyLifeUpgrade}
+                    disabled={arena.upgradeTokens <= 0 || arena.coins < arena.lifeUpgradeCost}
+                    className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                  >
+                    BUY LIFE (+20) - {arena.lifeUpgradeCost} GOLD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={buyDamageUpgrade}
+                    disabled={arena.upgradeTokens <= 0 || arena.coins < arena.damageUpgradeCost}
+                    className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                  >
+                    BUY DAMAGE (+3) - {arena.damageUpgradeCost} GOLD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={buyFireRateUpgrade}
+                    disabled={arena.upgradeTokens <= 0 || arena.coins < arena.fireRateUpgradeCost}
+                    className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+                  >
+                    BUY FIRE RATE - {arena.fireRateUpgradeCost} GOLD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleMusic}
+                    className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)]"
+                  >
+                    MUSIC {musicOn ? "OFF" : "ON"}
+                  </button>
+                </div>
+              ) : null}
 
               <div className="mt-6 flex flex-wrap gap-3">
                 <button
