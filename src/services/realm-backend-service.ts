@@ -445,19 +445,125 @@ export async function runTimedUpgradeAction(playerTag: string, userId: string | 
 }
 
 type DepositIntentMeta = {
+  intentId: string;
   amount: number;
   paymentMethod: string;
   network: "SOLANA";
   asset: "USDT";
   receiverWallet: string;
   playerTag: string;
+  provider: string;
 };
 
-export async function createRealmDepositIntent(playerTag: string, meta: DepositIntentMeta): Promise<void> {
+type DepositVerificationMeta = {
+  intentId: string;
+  status: string;
+  transactionId?: string;
+  provider: string;
+  providerPayload?: Record<string, unknown>;
+};
+
+export async function createRealmDepositIntent(
+  playerTag: string,
+  meta: Omit<DepositIntentMeta, "intentId">
+): Promise<{ intentId: string }> {
+  const intentId = `dep_${crypto.randomUUID()}`;
+
   await persistEvent(
     playerTag,
     "DEPOSIT_INTENT",
     `Deposit intent ${meta.amount.toFixed(2)} ${meta.asset} via ${meta.network} (${meta.paymentMethod})`,
-    meta
+    {
+      ...meta,
+      intentId,
+      status: "PENDING",
+    }
   );
+
+  return { intentId };
+}
+
+export async function markRealmDepositVerified(playerTag: string, meta: DepositVerificationMeta): Promise<void> {
+  await persistEvent(
+    playerTag,
+    "DEPOSIT_VERIFIED",
+    `Deposit ${meta.intentId} marked as ${meta.status}${meta.transactionId ? ` (tx: ${meta.transactionId})` : ""}`,
+    {
+      ...meta,
+      verifiedAt: new Date().toISOString(),
+    }
+  );
+}
+
+type DepositStatusResult = {
+  status: "PENDING" | "CONFIRMED" | "DENIED" | "FAILED" | "NOT_FOUND";
+  intentId: string;
+  transactionId?: string;
+};
+
+export async function getRealmDepositStatus(playerTag: string, intentId: string): Promise<DepositStatusResult> {
+  if (!(await isDbAvailable())) {
+    return {
+      status: "NOT_FOUND",
+      intentId,
+    };
+  }
+
+  try {
+    const events = await prisma.gameEvent.findMany({
+      where: {
+        player: { playerTag },
+        type: { in: ["DEPOSIT_INTENT", "DEPOSIT_VERIFIED"] },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        meta: true,
+        type: true,
+      },
+    });
+
+    for (const event of events) {
+      const meta = (event.meta as Record<string, unknown> | null) || null;
+      if (!meta || meta.intentId !== intentId) {
+        continue;
+      }
+
+      if (event.type === "DEPOSIT_VERIFIED") {
+        const normalized = String(meta.status || "PENDING").toUpperCase();
+        const status =
+          normalized === "CONFIRMED"
+            ? "CONFIRMED"
+            : normalized === "DENIED"
+              ? "DENIED"
+              : normalized === "FAILED"
+                ? "FAILED"
+                : "PENDING";
+        const transactionId = typeof meta.transactionId === "string" ? meta.transactionId : undefined;
+        return {
+          status,
+          intentId,
+          transactionId,
+        };
+      }
+
+      if (event.type === "DEPOSIT_INTENT") {
+        return {
+          status: "PENDING",
+          intentId,
+        };
+      }
+    }
+
+    return {
+      status: "NOT_FOUND",
+      intentId,
+    };
+  } catch {
+    dbAvailableCache = false;
+    return {
+      status: "NOT_FOUND",
+      intentId,
+    };
+  }
 }

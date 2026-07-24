@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function WalletPanel() {
   const [status, setStatus] = useState("Ready for external deposits.");
@@ -8,6 +8,8 @@ export function WalletPanel() {
   const [depositAmount, setDepositAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Card (Credit/Debit)");
   const [isSubmittingDeposit, setIsSubmittingDeposit] = useState(false);
+  const [activeIntentId, setActiveIntentId] = useState<string | null>(null);
+  const [depositVerification, setDepositVerification] = useState<"IDLE" | "PENDING" | "CONFIRMED" | "DENIED" | "FAILED">("IDLE");
 
   const binanceSolanaWallet = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
 
@@ -50,10 +52,16 @@ export function WalletPanel() {
         message?: string;
         solanaPayUrl?: string;
         externalCheckoutUrl?: string;
+        intentId?: string;
       };
       if (!response.ok) {
         setStatus(body.message || "Unable to create deposit intent.");
         return;
+      }
+
+      if (body.intentId) {
+        setActiveIntentId(body.intentId);
+        setDepositVerification("PENDING");
       }
 
       const checkoutUrl = paymentMethod === "Card (Credit/Debit)" ? body.externalCheckoutUrl : body.solanaPayUrl;
@@ -68,6 +76,66 @@ export function WalletPanel() {
       setIsSubmittingDeposit(false);
     }
   }
+
+  async function verifyDepositStatus() {
+    if (!activeIntentId) {
+      setStatus("No active deposit intent to verify.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/web3/deposit/status?intentId=${encodeURIComponent(activeIntentId)}`, {
+        cache: "no-store",
+      });
+
+      const body = (await response.json()) as {
+        status?: "PENDING" | "CONFIRMED" | "DENIED" | "FAILED" | "NOT_FOUND";
+        transactionId?: string;
+      };
+
+      if (!response.ok) {
+        setStatus("Unable to verify deposit status.");
+        return;
+      }
+
+      if (body.status === "CONFIRMED") {
+        setDepositVerification("CONFIRMED");
+        setStatus(`Payment confirmed${body.transactionId ? ` (tx: ${body.transactionId})` : ""}.`);
+        return;
+      }
+
+      if (body.status === "FAILED") {
+        setDepositVerification("FAILED");
+        setStatus("Payment failed or expired.");
+        return;
+      }
+
+      if (body.status === "DENIED") {
+        setDepositVerification("DENIED");
+        setStatus("Payment denied by provider.");
+        return;
+      }
+
+      setDepositVerification("PENDING");
+      setStatus("Payment still pending confirmation.");
+    } catch {
+      setStatus("Unable to verify deposit status.");
+    }
+  }
+
+  useEffect(() => {
+    if (!activeIntentId || depositVerification !== "PENDING") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void verifyDepositStatus();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeIntentId, depositVerification]);
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -134,6 +202,7 @@ export function WalletPanel() {
               <p>Network: Solana (SOL)</p>
               <p>Deposit type: External checkout</p>
               <p className="mt-2 break-all">Wallet: {binanceSolanaWallet}</p>
+              {activeIntentId ? <p className="mt-2 break-all">Intent: {activeIntentId}</p> : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -151,7 +220,19 @@ export function WalletPanel() {
               >
                 COPY WALLET
               </button>
+              <button
+                type="button"
+                onClick={verifyDepositStatus}
+                disabled={!activeIntentId || isSubmittingDeposit}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                VERIFY PAYMENT
+              </button>
             </div>
+
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Verification: {depositVerification}
+            </p>
           </form>
         </div>
       ) : null}

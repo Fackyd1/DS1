@@ -9,6 +9,33 @@ type DepositBody = {
 
 const RECEIVER_WALLET = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
 const USDT_SOLANA_MINT = process.env.NEXT_PUBLIC_SOLANA_USDT_MINT || "Es9vMFrzaCERmJfrF4H2FYD4KCoNkW8f2s9u6D4M7wNY";
+const DEPOSIT_PROVIDER = process.env.DEPOSIT_PROVIDER || "TRANSAK";
+
+function fillTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => values[key] ?? "");
+}
+
+function resolveCheckoutUrl(params: {
+  amount: number;
+  intentId: string;
+  playerTag: string;
+  receiverWallet: string;
+  asset: string;
+  network: string;
+}): string {
+  const template =
+    process.env.DEPOSIT_PROVIDER_URL_TEMPLATE ||
+    "https://global.transak.com/?productsAvailed=BUY&defaultCryptoCurrency={asset}&defaultNetwork={network}&walletAddress={wallet}&fiatCurrency=USD&fiatAmount={amount}&partnerOrderId={intentId}&partnerCustomerId={playerTag}";
+
+  return fillTemplate(template, {
+    amount: params.amount.toFixed(2),
+    wallet: encodeURIComponent(params.receiverWallet),
+    asset: encodeURIComponent(params.asset),
+    network: encodeURIComponent(params.network),
+    intentId: encodeURIComponent(params.intentId),
+    playerTag: encodeURIComponent(params.playerTag),
+  });
+}
 
 export async function POST(request: Request) {
   const session = await readSession();
@@ -23,30 +50,35 @@ export async function POST(request: Request) {
     return fail("amount must be a positive number", 400);
   }
 
-  const paymentMethod = body.paymentMethod?.trim() || "USDT (Solana)";
+  const paymentMethod = body.paymentMethod?.trim() || "Card (Credit/Debit)";
 
-  const encodedLabel = encodeURIComponent("DS1 Blockchain Gate");
-  const encodedMessage = encodeURIComponent(`USDT deposit for ${session.playerTag}`);
-  const encodedMemo = encodeURIComponent(`DS1-${session.playerTag}-${Date.now()}`);
-  const solanaPayUrl = `solana:${RECEIVER_WALLET}?amount=${amount.toFixed(2)}&spl-token=${USDT_SOLANA_MINT}&label=${encodedLabel}&message=${encodedMessage}&memo=${encodedMemo}`;
-  const externalCheckoutUrl =
-    `https://www.moonpay.com/buy/usdt` +
-    `?baseCurrencyAmount=${amount.toFixed(2)}` +
-    `&currencyCode=usd` +
-    `&walletAddress=${encodeURIComponent(RECEIVER_WALLET)}` +
-    `&network=solana`;
-
-  await createRealmDepositIntent(session.playerTag, {
+  const depositIntent = await createRealmDepositIntent(session.playerTag, {
     amount,
     paymentMethod,
     network: "SOLANA",
     asset: "USDT",
     receiverWallet: RECEIVER_WALLET,
     playerTag: session.playerTag,
+    provider: DEPOSIT_PROVIDER,
+  });
+
+  const encodedLabel = encodeURIComponent("DS1 Blockchain Gate");
+  const encodedMessage = encodeURIComponent(`USDT deposit for ${session.playerTag}`);
+  const encodedMemo = encodeURIComponent(depositIntent.intentId);
+  const solanaPayUrl = `solana:${RECEIVER_WALLET}?amount=${amount.toFixed(2)}&spl-token=${USDT_SOLANA_MINT}&label=${encodedLabel}&message=${encodedMessage}&memo=${encodedMemo}`;
+  const externalCheckoutUrl = resolveCheckoutUrl({
+    amount,
+    intentId: depositIntent.intentId,
+    playerTag: session.playerTag,
+    receiverWallet: RECEIVER_WALLET,
+    asset: "USDT",
+    network: "solana",
   });
 
   return ok({
-    message: "Deposit intent created. Continue in external checkout to complete transfer.",
+    message: "Deposit intent created. Continue in external checkout and wait for verification callback.",
+    intentId: depositIntent.intentId,
+    provider: DEPOSIT_PROVIDER,
     amount,
     paymentMethod,
     asset: "USDT",
