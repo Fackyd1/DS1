@@ -443,3 +443,21 @@ export async function runSellAction(
 export async function runTimedUpgradeAction(playerTag: string, userId: string | undefined) {
   return runRealmAction(playerTag, userId, "TIMED_UPGRADE", () => claimTimedUpgrade(playerTag));
 }
+
+type DepositIntentMeta = {
+  amount: number;
+  paymentMethod: string;
+  network: "SOLANA";
+  asset: "USDT";
+  receiverWallet: string;
+  playerTag: string;
+};
+
+export async function createRealmDepositIntent(playerTag: string, meta: DepositIntentMeta): Promise<void> {
+  await persistEvent(
+    playerTag,
+    "DEPOSIT_INTENT",
+    `Deposit intent ${meta.amount.toFixed(2)} ${meta.asset} via ${meta.network} (${meta.paymentMethod})`,
+    meta
+  );
+}
