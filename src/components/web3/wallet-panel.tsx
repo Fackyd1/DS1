@@ -9,6 +9,7 @@ export function WalletPanel() {
   const [paymentMethod, setPaymentMethod] = useState("Card (Credit/Debit)");
   const [isSubmittingDeposit, setIsSubmittingDeposit] = useState(false);
   const [activeIntentId, setActiveIntentId] = useState<string | null>(null);
+  const [activePlayerTag, setActivePlayerTag] = useState<string | null>(null);
   const [depositVerification, setDepositVerification] = useState<"IDLE" | "PENDING" | "CONFIRMED" | "DENIED" | "FAILED">("IDLE");
 
   const binanceSolanaWallet = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
@@ -53,6 +54,7 @@ export function WalletPanel() {
         solanaPayUrl?: string;
         externalCheckoutUrl?: string;
         intentId?: string;
+        playerTag?: string;
       };
       if (!response.ok) {
         setStatus(body.message || "Unable to create deposit intent.");
@@ -62,6 +64,9 @@ export function WalletPanel() {
       if (body.intentId) {
         setActiveIntentId(body.intentId);
         setDepositVerification("PENDING");
+      }
+      if (body.playerTag) {
+        setActivePlayerTag(body.playerTag);
       }
 
       const checkoutUrl = paymentMethod === "Card (Credit/Debit)" ? body.externalCheckoutUrl : body.solanaPayUrl;
@@ -84,9 +89,12 @@ export function WalletPanel() {
     }
 
     try {
-      const response = await fetch(`/api/web3/deposit/status?intentId=${encodeURIComponent(activeIntentId)}`, {
-        cache: "no-store",
-      });
+      const params = new URLSearchParams({ intentId: activeIntentId });
+      if (activePlayerTag) {
+        params.set("playerTag", activePlayerTag);
+      }
+
+      const response = await fetch(`/api/web3/deposit/status?${params.toString()}`, { cache: "no-store" });
 
       const body = (await response.json()) as {
         status?: "PENDING" | "CONFIRMED" | "DENIED" | "FAILED" | "NOT_FOUND";
@@ -135,7 +143,7 @@ export function WalletPanel() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeIntentId, depositVerification]);
+  }, [activeIntentId, activePlayerTag, depositVerification]);
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">

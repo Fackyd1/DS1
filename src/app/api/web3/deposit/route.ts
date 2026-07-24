@@ -5,6 +5,7 @@ import { createRealmDepositIntent } from "@/services/realm-backend-service";
 type DepositBody = {
   amount?: number;
   paymentMethod?: string;
+  playerTag?: string;
 };
 
 const RECEIVER_WALLET = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
@@ -39,9 +40,6 @@ function resolveCheckoutUrl(params: {
 
 export async function POST(request: Request) {
   const session = await readSession();
-  if (!session) {
-    return fail("Unauthorized", 401);
-  }
 
   const body = (await request.json()) as DepositBody;
   const amount = Number(body.amount);
@@ -51,25 +49,27 @@ export async function POST(request: Request) {
   }
 
   const paymentMethod = body.paymentMethod?.trim() || "Card (Credit/Debit)";
+  const requestPlayerTag = body.playerTag?.trim();
+  const playerTag = session?.playerTag || requestPlayerTag || `public-${Date.now()}`;
 
-  const depositIntent = await createRealmDepositIntent(session.playerTag, {
+  const depositIntent = await createRealmDepositIntent(playerTag, {
     amount,
     paymentMethod,
     network: "SOLANA",
     asset: "USDT",
     receiverWallet: RECEIVER_WALLET,
-    playerTag: session.playerTag,
+    playerTag,
     provider: DEPOSIT_PROVIDER,
   });
 
   const encodedLabel = encodeURIComponent("DS1 Blockchain Gate");
-  const encodedMessage = encodeURIComponent(`USDT deposit for ${session.playerTag}`);
+  const encodedMessage = encodeURIComponent(`USDT deposit for ${playerTag}`);
   const encodedMemo = encodeURIComponent(depositIntent.intentId);
   const solanaPayUrl = `solana:${RECEIVER_WALLET}?amount=${amount.toFixed(2)}&spl-token=${USDT_SOLANA_MINT}&label=${encodedLabel}&message=${encodedMessage}&memo=${encodedMemo}`;
   const externalCheckoutUrl = resolveCheckoutUrl({
     amount,
     intentId: depositIntent.intentId,
-    playerTag: session.playerTag,
+    playerTag,
     receiverWallet: RECEIVER_WALLET,
     asset: "USDT",
     network: "solana",
@@ -79,6 +79,7 @@ export async function POST(request: Request) {
     message: "Deposit intent created. Continue in external checkout and wait for verification callback.",
     intentId: depositIntent.intentId,
     provider: DEPOSIT_PROVIDER,
+    playerTag,
     amount,
     paymentMethod,
     asset: "USDT",
