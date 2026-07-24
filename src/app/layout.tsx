@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Cormorant_Garamond, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import { GameShellProvider } from "@/components/game/game-shell-context";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/navigation/site-header";
 
@@ -58,9 +59,11 @@ export default function RootLayout({
       className={`${spaceGrotesk.variable} ${cormorantGaramond.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-[var(--color-bg)] text-[var(--color-text)]">
-        <SiteHeader />
-        <main className="flex min-h-screen flex-col">{children}</main>
-        <SiteFooter />
+        <GameShellProvider>
+          <SiteHeader />
+          <main className="flex min-h-screen flex-col">{children}</main>
+          <SiteFooter />
+        </GameShellProvider>
       </body>
     </html>
   );

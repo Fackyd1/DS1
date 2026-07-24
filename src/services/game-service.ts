@@ -313,6 +313,36 @@ export function sellResource(playerTag: string, resource: Exclude<ResourceKey, "
   return { player, message: `Sold ${amount} ${resource} for ${earned} GOLD.` };
 }
 
+export function claimTimedUpgrade(playerTag: string): GameActionResult {
+  const player = getOrCreatePlayer(playerTag);
+  touchPlayer(player);
+
+  const workbenchLevel = player.buildings.find((building) => building.key === "WORKBENCH")?.level ?? 0;
+  const marketLevel = player.buildings.find((building) => building.key === "MARKET")?.level ?? 0;
+
+  const upgrade = {
+    WOOD: 60 + workbenchLevel * 12,
+    STONE: 45 + marketLevel * 10,
+    IRON: 30 + Math.max(workbenchLevel, marketLevel) * 8,
+    GOLD: 20 + workbenchLevel * 4 + marketLevel * 4,
+  } satisfies Record<ResourceKey, number>;
+
+  player.resources.WOOD += upgrade.WOOD;
+  player.resources.STONE += upgrade.STONE;
+  player.resources.IRON += upgrade.IRON;
+  player.resources.GOLD += upgrade.GOLD;
+  grantXp(player, 30 + Math.floor((workbenchLevel + marketLevel) / 2) * 5);
+
+  publishEvent(`${player.playerTag} claimed a timed upgrade.`);
+  checkQuestCompletions(player);
+  player.updatedAt = nowIso();
+
+  return {
+    player,
+    message: `Timed upgrade claimed. +${upgrade.WOOD} WOOD, +${upgrade.STONE} STONE, +${upgrade.IRON} IRON, +${upgrade.GOLD} GOLD.`,
+  };
+}
+
 export function getLeaderboard() {
   const entries = [...playerStore.values()].map((player) => ({
     player: player.playerTag,

@@ -43,6 +43,10 @@ export const sellSchema = z.object({
   amount: z.number().int().min(1).max(1000000),
 });
 
+export const timedUpgradeSchema = z.object({
+  source: z.literal("auto").optional(),
+});
+
 export const loginSchema = z.object({
   email: z.string().trim().email(),
   password: z.string().min(8).max(72),

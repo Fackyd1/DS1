@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, useScroll } from "framer-motion";
 import { Menu, X } from "lucide-react";
+import { useGameShell } from "@/components/game/game-shell-context";
 
 const NAV_ITEMS = [
   { label: "About", href: "/about" },
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
 export function SiteHeader() {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const { closeGame, isPlaying, setMenuOpen } = useGameShell();
   const { scrollYProgress } = useScroll();
 
   useEffect(() => {
@@ -38,10 +40,12 @@ export function SiteHeader() {
 
   useEffect(() => {
     document.body.style.overflow = isOpen ? "hidden" : "";
+    setMenuOpen(isOpen);
     return () => {
       document.body.style.overflow = "";
+      setMenuOpen(false);
     };
-  }, [isOpen]);
+  }, [isOpen, setMenuOpen]);
 
   return (
     <header className="fixed inset-x-0 top-0 z-50">
@@ -82,12 +86,22 @@ export function SiteHeader() {
         </ul>
 
         <div className="hidden md:block">
-          <Link
-            href="/realm"
-            className="rounded-full border border-[var(--color-accent)]/60 px-4 py-2 text-xs font-semibold tracking-[0.12em] text-[var(--color-text)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
-          >
-            PLAY THE REALM
-          </Link>
+          {isPlaying ? (
+            <button
+              type="button"
+              onClick={closeGame}
+              className="rounded-full border border-[var(--color-accent)]/60 px-4 py-2 text-xs font-semibold tracking-[0.12em] text-[var(--color-text)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
+            >
+              CLOSE GAME
+            </button>
+          ) : (
+            <Link
+              href="/realm"
+              className="rounded-full border border-[var(--color-accent)]/60 px-4 py-2 text-xs font-semibold tracking-[0.12em] text-[var(--color-text)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
+            >
+              PLAY THE REALM
+            </Link>
+          )}
         </div>
 
         <button
@@ -129,8 +143,20 @@ export function SiteHeader() {
               onClick={() => setIsOpen(false)}
               className="mt-6 block rounded-xl border border-[var(--color-accent)]/70 px-3 py-3 text-center text-sm font-semibold tracking-[0.12em] text-[var(--color-text)]"
             >
-              PLAY THE REALM
+              {isPlaying ? "CLOSE GAME" : "PLAY THE REALM"}
             </Link>
+            {isPlaying ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  closeGame();
+                }}
+                className="mt-3 block w-full rounded-xl border border-[var(--color-accent)]/70 px-3 py-3 text-center text-sm font-semibold tracking-[0.12em] text-[var(--color-text)]"
+              >
+                CLOSE GAME
+              </button>
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>

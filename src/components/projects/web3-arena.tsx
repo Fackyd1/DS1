@@ -63,6 +63,9 @@ type ArenaState = {
   damage: number;
   shootEveryMs: number;
   upgradeTokens: number;
+  swordUnlocked: boolean;
+  potionCount: number;
+  potionStock: number;
   running: boolean;
   paused: boolean;
 };
@@ -80,6 +83,14 @@ const SHOOT_EVERY_MS = 230;
 const MIN_SHOOT_EVERY_MS = 90;
 const UPGRADE_INTERVAL_SECONDS = 120;
 const ROUND_DURATION_SECONDS = 45;
+const SWORD_COST = 3000;
+const SWORD_RANGE = 22;
+const SWORD_DAMAGE = 9999;
+const SWORD_COOLDOWN_MS = 3000;
+const POTION_COST = 300;
+const POTION_HEAL = 40;
+const POTION_MAX_CARRY = 3;
+const POTION_ROUND_STOCK = 8;
 const CLAIM_SCORE_TARGET = 2000;
 
 const ENEMY_POOL: EnemyTemplate[] = [
@@ -164,6 +175,9 @@ function createArenaStartState(): ArenaState {
     damage: 9,
     shootEveryMs: SHOOT_EVERY_MS,
     upgradeTokens: 0,
+    swordUnlocked: false,
+    potionCount: 0,
+    potionStock: POTION_ROUND_STOCK,
     running: false,
     paused: false,
   };
@@ -179,6 +193,7 @@ export function Web3Arena() {
   const nextEnemyIdRef = useRef(1);
   const nextBulletIdRef = useRef(1);
   const lastBossWaveSpawnedRef = useRef(0);
+  const lastMeleeRef = useRef(0);
   const bossBannerTimeoutRef = useRef<number | null>(null);
   const lastSpawnRef = useRef(0);
   const lastShootRef = useRef(0);
@@ -278,6 +293,7 @@ export function Web3Arena() {
     nextEnemyIdRef.current = 1;
     nextBulletIdRef.current = 1;
     lastBossWaveSpawnedRef.current = 0;
+    lastMeleeRef.current = 0;
     lastSpawnRef.current = 0;
     lastShootRef.current = 0;
     lastTickRef.current = 0;
@@ -296,7 +312,7 @@ export function Web3Arena() {
     }
 
     playerRenderRef.current = { ...startState.player };
-    setClaimStatus("Survive and earn upgrades every 120 seconds.");
+    setClaimStatus("Survive and earn upgrades every 120 seconds. Sword costs 3000 GOLD. Potions cost 300 GOLD.");
 
     startMusic();
   }
@@ -310,6 +326,22 @@ export function Web3Arena() {
           const next = !prev;
           setArena((current) => ({ ...current, paused: next }));
           return next;
+        });
+        return;
+      }
+
+      if (key === "q") {
+        setArena((previous) => {
+          if (!previous.running || previous.paused || previous.potionCount <= 0 || previous.hp <= 0) {
+            return previous;
+          }
+
+          const nextHp = Math.min(previous.maxHp, previous.hp + POTION_HEAL);
+          return {
+            ...previous,
+            hp: nextHp,
+            potionCount: previous.potionCount - 1,
+          };
         });
         return;
       }
@@ -495,6 +527,40 @@ export function Web3Arena() {
       });
     };
 
+    const meleeStrike = (now: number, playerPos: Vec2, damage: number, strikeEveryMs: number) => {
+      if (now - lastMeleeRef.current < strikeEveryMs) {
+        return { scoreGain: 0, coinGain: 0 };
+      }
+
+      lastMeleeRef.current = now;
+
+      let target: Enemy | null = null;
+      let targetDistance = Number.POSITIVE_INFINITY;
+
+      for (const enemy of enemiesRef.current) {
+        if (enemy.kind === "BOSS_EYE") {
+          continue;
+        }
+
+        const dx = enemy.pos.x - playerPos.x;
+        const dy = enemy.pos.y - playerPos.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance <= SWORD_RANGE + enemy.radius && distance < targetDistance) {
+          target = enemy;
+          targetDistance = distance;
+        }
+      }
+
+      if (!target) {
+        return { scoreGain: 0, coinGain: 0 };
+      }
+
+      return {
+        scoreGain: target.hp <= damage ? target.scoreValue : 0,
+        coinGain: target.hp <= damage && Math.random() < 0.3 ? randomBetween(target.coinMin, target.coinMax) : 0,
+      };
+    };
+
     const tick = (now: number) => {
       if (!arena.running) return;
 
@@ -528,10 +594,21 @@ export function Web3Arena() {
         const playerPos = { x: px, y: py };
         const time = previous.time + delta;
         const wave = Math.max(1, 1 + Math.floor(time / ROUND_DURATION_SECONDS));
+        const roundGroup = Math.floor((wave - 1) / 10);
+        const previousRoundGroup = Math.floor((previous.wave - 1) / 10);
 
         spawnEnemy(now, wave, previous.time);
         spawnBossIfNeeded(wave);
-        shoot(now, playerPos, previous.damage, previous.shootEveryMs);
+        let scoreGain = 0;
+        let coinGain = 0;
+
+        if (previous.swordUnlocked) {
+          const meleeResult = meleeStrike(now, playerPos, SWORD_DAMAGE, SWORD_COOLDOWN_MS);
+          scoreGain += meleeResult.scoreGain;
+          coinGain += meleeResult.coinGain;
+        } else {
+          shoot(now, playerPos, previous.damage, previous.shootEveryMs);
+        }
 
         enemiesRef.current = enemiesRef.current.map((enemy) => {
           const dx = playerPos.x - enemy.pos.x;
@@ -553,9 +630,6 @@ export function Web3Arena() {
             y: bullet.pos.y + bullet.vel.y * delta,
           },
         }));
-
-        let scoreGain = 0;
-        let coinGain = 0;
 
         for (const bullet of bulletsRef.current) {
           if (bullet.damage <= 0) continue;
@@ -605,6 +679,11 @@ export function Web3Arena() {
         const score = previous.score + scoreGain;
 
         let upgradeTokens = previous.upgradeTokens;
+        let potionStock = previous.potionStock;
+
+        if (roundGroup > previousRoundGroup) {
+          potionStock = POTION_ROUND_STOCK;
+        }
 
         const previousUpgradeWindow = Math.floor(previous.time / UPGRADE_INTERVAL_SECONDS);
         const currentUpgradeWindow = Math.floor(time / UPGRADE_INTERVAL_SECONDS);
@@ -641,6 +720,7 @@ export function Web3Arena() {
             time,
             coins: previous.coins + coinGain,
             upgradeTokens,
+            potionStock,
             running: false,
             paused: true,
           };
@@ -656,6 +736,7 @@ export function Web3Arena() {
           coins: previous.coins + coinGain,
           shootEveryMs: previous.shootEveryMs,
           upgradeTokens,
+          potionStock,
         };
       });
 
@@ -895,6 +976,36 @@ export function Web3Arena() {
     setClaimStatus("Life upgraded.");
   }
 
+  function buySwordUpgrade() {
+    setArena((previous) => {
+      if (previous.swordUnlocked || previous.coins < SWORD_COST) return previous;
+
+      return {
+        ...previous,
+        coins: previous.coins - SWORD_COST,
+        swordUnlocked: true,
+        potionCount: Math.min(previous.potionCount, POTION_MAX_CARRY),
+      };
+    });
+    setClaimStatus("Sword equipped. Melee mode enabled.");
+  }
+
+  function buyPotion() {
+    setArena((previous) => {
+      if (previous.coins < POTION_COST || previous.potionCount >= POTION_MAX_CARRY || previous.potionStock <= 0) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        coins: previous.coins - POTION_COST,
+        potionCount: previous.potionCount + 1,
+        potionStock: previous.potionStock - 1,
+      };
+    });
+    setClaimStatus("Potion purchased.");
+  }
+
   function resumeGame() {
     setMenuOpen(false);
     setArena((previous) => ({
@@ -1005,6 +1116,13 @@ export function Web3Arena() {
           </span>
           <span className="rounded-full border border-white/20 px-3 py-1">WAVE {arena.wave}</span>
           <span className="rounded-full border border-white/20 px-3 py-1">ROUND 45s</span>
+          <span className="rounded-full border border-white/20 px-3 py-1">
+            SWORD {arena.swordUnlocked ? "ON" : `${SWORD_COST}G`}
+          </span>
+          <span className="rounded-full border border-white/20 px-3 py-1">
+            POTIONS {arena.potionCount}/{POTION_MAX_CARRY}
+          </span>
+          <span className="rounded-full border border-white/20 px-3 py-1">SHOP {arena.potionStock}/8</span>
           <span className="rounded-full border border-white/20 px-3 py-1">CHAIN {chainId}</span>
         </div>
       </div>
@@ -1072,8 +1190,9 @@ export function Web3Arena() {
 
       <p className="mt-3 text-sm text-[var(--color-text-muted)]">{claimStatus}</p>
       <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-        Score target: {CLAIM_SCORE_TARGET}. Next timed power-up in {secondsToNextUpgrade}s. Press Escape during game
-        to open pause menu.
+        Score target: {CLAIM_SCORE_TARGET}. Next timed power-up in {secondsToNextUpgrade}s. Press Q to use a life
+        potion and Escape during game to open pause menu. Sword melee hits only nearby normal enemies with a 3s
+        cooldown.
       </p>
 
       {menuOpen ? (
@@ -1087,9 +1206,27 @@ export function Web3Arena() {
             <div className="mt-4 grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
               <p>Upgrade Tokens: {arena.upgradeTokens}</p>
               <p>Next Timed Upgrade: {secondsToNextUpgrade}s</p>
+              <p>Sword: {arena.swordUnlocked ? "Equipped" : `Locked (${SWORD_COST} GOLD)`}</p>
+              <p>Potions: {arena.potionCount}/{POTION_MAX_CARRY} carried</p>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={buySwordUpgrade}
+                disabled={arena.swordUnlocked || arena.coins < SWORD_COST}
+                className="rounded-full border border-[var(--color-accent)]/70 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+              >
+                {arena.swordUnlocked ? "SWORD EQUIPPED" : "BUY SWORD (3000 GOLD)"}
+              </button>
+              <button
+                type="button"
+                onClick={buyPotion}
+                disabled={arena.coins < POTION_COST || arena.potionCount >= POTION_MAX_CARRY || arena.potionStock <= 0}
+                className="rounded-full border border-white/20 px-4 py-2 text-sm text-[var(--color-text)] disabled:opacity-40"
+              >
+                BUY POTION (300 GOLD)
+              </button>
               <button
                 type="button"
                 onClick={buyLifeUpgrade}
