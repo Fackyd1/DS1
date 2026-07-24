@@ -1,60 +1,15 @@
 "use client";
 
-import { BrowserProvider } from "ethers";
 import { useState } from "react";
 
-type EthereumProvider = {
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-};
-
-type WalletState = {
-  address: string;
-  chainId: string;
-};
-
 export function WalletPanel() {
-  const [wallet, setWallet] = useState<WalletState | null>(null);
-  const [status, setStatus] = useState("Wallet disconnected");
+  const [status, setStatus] = useState("Ready for external deposits.");
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("USDT (Solana)");
+  const [paymentMethod, setPaymentMethod] = useState("Card (Credit/Debit)");
   const [isSubmittingDeposit, setIsSubmittingDeposit] = useState(false);
 
   const binanceSolanaWallet = "HnG8ybQeEsN8swuRA44LDg19CiMUV24EDXJdbxVtSZSB";
-
-  async function connectWallet() {
-    try {
-      if (!("ethereum" in window)) {
-        setStatus("No wallet provider detected.");
-        return;
-      }
-
-      const provider = new BrowserProvider(
-        (window as Window & { ethereum?: EthereumProvider }).ethereum as EthereumProvider
-      );
-      const accounts = await provider.send("eth_requestAccounts", []);
-      const network = await provider.getNetwork();
-      const account = accounts[0] as string | undefined;
-
-      if (!account) {
-        setStatus("No account selected.");
-        return;
-      }
-
-      setWallet({
-        address: account,
-        chainId: network.chainId.toString(),
-      });
-      setStatus("Wallet connected.");
-    } catch {
-      setStatus("Unable to connect wallet.");
-    }
-  }
-
-  function disconnectWallet() {
-    setWallet(null);
-    setStatus("Wallet disconnected");
-  }
 
   async function copyWalletAddress() {
     try {
@@ -91,14 +46,19 @@ export function WalletPanel() {
         body: JSON.stringify({ amount: parsedAmount, paymentMethod }),
       });
 
-      const body = (await response.json()) as { message?: string; solanaPayUrl?: string };
+      const body = (await response.json()) as {
+        message?: string;
+        solanaPayUrl?: string;
+        externalCheckoutUrl?: string;
+      };
       if (!response.ok) {
         setStatus(body.message || "Unable to create deposit intent.");
         return;
       }
 
-      if (body.solanaPayUrl) {
-        window.open(body.solanaPayUrl, "_blank", "noopener,noreferrer");
+      const checkoutUrl = paymentMethod === "Card (Credit/Debit)" ? body.externalCheckoutUrl : body.solanaPayUrl;
+      if (checkoutUrl) {
+        window.open(checkoutUrl, "_blank", "noopener,noreferrer");
       }
 
       setStatus(body.message || `Deposit started: ${parsedAmount.toFixed(2)} USDT on Solana.`);
@@ -112,7 +72,7 @@ export function WalletPanel() {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
       <h3 className="text-xl text-[var(--color-text)]">Blockchain Gate</h3>
-      <p className="mt-2 text-sm text-[var(--color-text-muted)]">Optional wallet mode on testnet. No private keys stored.</p>
+      <p className="mt-2 text-sm text-[var(--color-text-muted)]">External payment flow to fund your USDT wallet on Solana.</p>
 
       <div className="mt-4 flex flex-wrap gap-3">
         <button
@@ -120,17 +80,7 @@ export function WalletPanel() {
           onClick={openDepositWindow}
           className="rounded-full border border-[var(--color-web3)]/60 px-4 py-2 text-sm"
         >
-          CONNECT WALLET
-        </button>
-        <button
-          type="button"
-          onClick={connectWallet}
-          className="rounded-full border border-white/20 px-4 py-2 text-sm"
-        >
-          CONNECT EVM
-        </button>
-        <button type="button" onClick={disconnectWallet} className="rounded-full border border-white/20 px-4 py-2 text-sm">
-          DISCONNECT
+          OPEN PAYMENT FORM
         </button>
       </div>
 
@@ -175,12 +125,14 @@ export function WalletPanel() {
               onChange={(event) => setPaymentMethod(event.target.value)}
               className="w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-web3)]/70"
             >
-              <option>USDT (Solana)</option>
+              <option>Card (Credit/Debit)</option>
+              <option>USDT (Solana Wallet)</option>
             </select>
 
             <div className="rounded-xl border border-white/15 bg-black/20 p-3 text-sm text-[var(--color-text-soft)]">
               <p>Asset: USDT</p>
               <p>Network: Solana (SOL)</p>
+              <p>Deposit type: External checkout</p>
               <p className="mt-2 break-all">Wallet: {binanceSolanaWallet}</p>
             </div>
 
@@ -190,7 +142,7 @@ export function WalletPanel() {
                 disabled={isSubmittingDeposit}
                 className="rounded-full border border-[var(--color-web3)]/60 px-4 py-2 text-sm text-[var(--color-text)]"
               >
-                {isSubmittingDeposit ? "OPENING WALLET..." : "MAKE DEPOSIT"}
+                {isSubmittingDeposit ? "OPENING CHECKOUT..." : "MAKE DEPOSIT"}
               </button>
               <button
                 type="button"
@@ -201,13 +153,6 @@ export function WalletPanel() {
               </button>
             </div>
           </form>
-        </div>
-      ) : null}
-
-      {wallet ? (
-        <div className="mt-4 text-sm text-[var(--color-text-soft)]">
-          <p>Address: {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}</p>
-          <p>Chain: {wallet.chainId}</p>
         </div>
       ) : null}
     </section>

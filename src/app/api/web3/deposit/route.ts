@@ -29,6 +29,12 @@ export async function POST(request: Request) {
   const encodedMessage = encodeURIComponent(`USDT deposit for ${session.playerTag}`);
   const encodedMemo = encodeURIComponent(`DS1-${session.playerTag}-${Date.now()}`);
   const solanaPayUrl = `solana:${RECEIVER_WALLET}?amount=${amount.toFixed(2)}&spl-token=${USDT_SOLANA_MINT}&label=${encodedLabel}&message=${encodedMessage}&memo=${encodedMemo}`;
+  const externalCheckoutUrl =
+    `https://www.moonpay.com/buy/usdt` +
+    `?baseCurrencyAmount=${amount.toFixed(2)}` +
+    `&currencyCode=usd` +
+    `&walletAddress=${encodeURIComponent(RECEIVER_WALLET)}` +
+    `&network=solana`;
 
   await createRealmDepositIntent(session.playerTag, {
     amount,
@@ -40,12 +46,13 @@ export async function POST(request: Request) {
   });
 
   return ok({
-    message: "Deposit intent created. Open in a Solana wallet to complete transfer.",
+    message: "Deposit intent created. Continue in external checkout to complete transfer.",
     amount,
     paymentMethod,
     asset: "USDT",
     network: "SOLANA",
     receiverWallet: RECEIVER_WALLET,
     solanaPayUrl,
+    externalCheckoutUrl,
   });
 }
